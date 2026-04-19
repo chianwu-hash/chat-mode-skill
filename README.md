@@ -17,7 +17,33 @@
    git clone https://github.com/chianwu-hash/chat-mode-skill.git
    ```
 
-2. Copy the skill folder into your Codex skills directory.
+2. Run the installer for your platform.
+
+   Linux/macOS:
+
+   ```bash
+   ./install.sh
+   ```
+
+   Windows:
+
+   ```powershell
+   .\install.ps1
+   ```
+
+   To also copy helper scripts into a host project:
+
+   ```bash
+   ./install.sh --tools-target ../your-host-project/tools
+   ```
+
+   ```powershell
+   .\install.ps1 -ToolsTarget ..\your-host-project\tools
+   ```
+
+   The installers check for `git`, `pwsh`, `codex`, and `claude`. They can auto-install `git` and `pwsh` on supported platforms, while `codex` and `claude` remain account-based tools that are reported as warnings when missing.
+
+3. Manual install is also supported. Copy the skill folder into your Codex skills directory.
 
    ```powershell
    Copy-Item -Recurse .\chat-mode-skill\skills\chat-mode $env:USERPROFILE\.codex\skills\chat-mode
@@ -25,7 +51,7 @@
 
    The exact Codex skills directory may vary by installation. On Windows, `$env:USERPROFILE\.codex\skills\` is the common default. On macOS/Linux, it is commonly `~/.codex/skills/`. If your Codex setup uses `CODEX_HOME`, install to `$env:CODEX_HOME\skills\chat-mode` on PowerShell or `$CODEX_HOME/skills/chat-mode` in POSIX shells.
 
-3. Copy the helper scripts into any host project where you want chat-mode support.
+4. Copy the helper scripts into any host project where you want chat-mode support.
 
    ```powershell
    Copy-Item -Recurse .\chat-mode-skill\tools .\your-host-project\tools
