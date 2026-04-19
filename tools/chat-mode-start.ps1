@@ -99,11 +99,27 @@ function New-MirroredPrompt {
     param(
         [string]$TaskTopic,
         [int]$Turns,
-        [string]$StarterAgent
+        [string]$StarterAgent,
+        [string]$StateFilePath,
+        [string]$RootPath
     )
 
     $starterLabel = Get-AgentLabel -Agent $StarterAgent
-    return "For '$TaskTopic', you and the other agent are running chat-mode for $Turns turns. $starterLabel starts. $starterLabel has started round 1; please continue with the next round."
+    $relativeState = Get-RelativePath -RootPath $RootPath -FullPath $StateFilePath
+
+    return @"
+Chat-mode session started: '$TaskTopic' ($Turns turns). $starterLabel has written round 1.
+
+To continue as the next agent:
+1. Read the shared state file at: $relativeState
+2. Read the session file pointed to by the state's `session_file` field (resolve relative paths from the repo root).
+3. Write your round as the next section in the session file.
+4. Update `current_turn`, `current_agent`, `poll_interval_seconds`, `next_check_at`, and `updated_at` in the state file. Set `current_agent` to the first mover's agent name so they know to act next.
+5. Schedule a ScheduleWakeup (90 seconds) to poll for the other agent's next round.
+6. Enter the polling retry loop: re-read state after each wait; if `current_agent` is you, respond; if not and retries remain, wait again; if retries exhausted, set status=interrupted.
+
+Do not read any handoff file. The state file and session file are the only inputs.
+"@
 }
 
 function Get-SessionSlug {
@@ -165,7 +181,7 @@ $now = [datetimeoffset]::Now
 $nextCheck = $now.AddSeconds($PollIntervalSeconds)
 $starter = $FirstMover
 $nextOwner = Get-OtherAgent -Agent $starter
-$mirroredPrompt = New-MirroredPrompt -TaskTopic $Topic -Turns $MaxTurns -StarterAgent $starter
+$mirroredPrompt = New-MirroredPrompt -TaskTopic $Topic -Turns $MaxTurns -StarterAgent $starter -StateFilePath $StatePath -RootPath $RepoPath
 
 $sessionFilePath = New-SessionFilePath -Directory $SessionDir -Summary $TaskSummary -When $now
 $sessionFileRelative = Get-RelativePath -RootPath $RepoPath -FullPath $sessionFilePath
