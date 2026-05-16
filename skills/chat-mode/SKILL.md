@@ -1,6 +1,6 @@
 # Skill: chat-mode
 
-Use this skill when the user asks two coding agents, such as Codex and Claude Code, to collaborate for a bounded number of turns or a bounded time window. The skill defines a file-backed turn protocol using a shared state file, per-session markdown transcripts, ScheduleWakeup-style polling, and copyable mirrored prompts.
+Use this skill when the user asks two coding agents, such as Codex and Claude Code, to collaborate for a bounded number of turns or a bounded time window. Prefer the CLI runner when it exists; use the manual file-backed prompt/polling protocol only as a fallback.
 
 ---
 
@@ -23,7 +23,7 @@ Before checking `.chat-mode/config.json`, reading state, or starting a new sessi
 
 Do not inspect or reuse a parent repo's `.chat-mode` directory unless that same repo also contains the runner.
 
-### Preferred Local Runner
+### Runner Mode: Default And Fully Automated
 
 If the host project contains `tools/chat-mode-run.ps1` and the user asks for CLI orchestration or a natural-language "chat-mode" / "暢聊模式" run, the runner is mandatory:
 
@@ -36,13 +36,26 @@ pwsh -NoProfile -File .\tools\chat-mode-run.ps1 `
   -FirstMover codex
 ```
 
-The runner invokes both worker CLIs as subprocesses, writes the transcript, and updates state. Do not simulate the other agent's rounds when the runner is available. Do not replace the runner with `tests/smoke.ps1` or `tests/run-smoke.ps1`.
+The runner invokes both worker CLIs as subprocesses, writes the transcript, and updates state. Codex CLI does not require user intervention in runner mode.
+
+In runner mode:
+
+- Do not generate or print a mirrored prompt for the user to copy.
+- Do not ask the user to switch to Codex or Claude.
+- Do not use ScheduleWakeup or manual polling.
+- Do not simulate the other agent's rounds.
+- Do not replace the runner with `tests/smoke.ps1` or `tests/run-smoke.ps1`.
+- If the user says "you start" / `你先開始`, set `-FirstMover` to the current agent and run the runner.
 
 If `.chat-mode/config.json` is missing, run `tools/chat-mode-setup.ps1` from Codex first. If setup cannot be run from the current agent, stop and tell the user to start setup from Codex.
 
 If the runner fails, report the error and stop. Do not continue by roleplaying the missing worker output.
 
-On Windows, Codex worker calls may bypass sandbox even in review mode because Codex sandbox modes can block file inspection. The runner must fail the session if worker execution changes `git diff --stat` or `git status --short`.
+On Windows, Codex worker calls may bypass sandbox even in review mode because Codex sandbox modes can block file inspection. The runner records `diff_stat_after` and `git status` after each worker call; inspect those results before recommending a commit or push.
+
+### Manual Fallback Only
+
+Use the rest of this document only when `tools/chat-mode-run.ps1` is unavailable or the user explicitly asks for manual file-backed handoff. It does not apply to runner mode.
 
 ### Priority Rule
 
@@ -89,7 +102,7 @@ Skipping any step means the other agent cannot proceed autonomously.
 
 ---
 
-## Activation Checklist
+## Manual Activation Checklist
 
 Activation must show the mirrored prompt before any long-running work, then continue the session in the same response when the receiving agent is the first mover. This lets the user copy the prompt immediately without delaying round 1.
 
@@ -117,7 +130,7 @@ Do not proceed if any step cannot be completed.
 
 ---
 
-## Mirrored-Start Rule
+## Manual Mirrored-Start Rule
 
 When the user starts a session with one agent, generate a copy-ready message for the other agent.
 

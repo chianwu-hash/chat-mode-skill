@@ -31,6 +31,8 @@ pwsh -NoProfile -File .\tools\chat-mode-run.ps1 `
   -FirstMover claude
 ```
 
+When the runner exists, this is fully automated: the runner starts both Claude and Codex worker CLIs as subprocesses. Do not print a mirrored prompt for the user to copy to Codex, do not ask the user to switch agents, and do not wait for manual handoff. If the user says "you start" / `你先開始`, set `-FirstMover claude` and run the runner.
+
 If `.chat-mode/config.json` is missing or does not contain a verified `codex_exe`, stop and tell the user to run first setup from Codex:
 
 ```powershell
