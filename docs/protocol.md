@@ -53,8 +53,9 @@ Keep state values machine-friendly and ASCII where practical. Put user-facing pr
 2. Show the mirrored prompt to the user before long-running work.
 3. Create the state file.
 4. Create the session file skeleton.
-5. If this agent is the first mover, write round 1 immediately in the same response.
-6. Update state, schedule wakeup, and enter polling.
+5. Leave `current_agent` set to the first mover; bootstrap does not create round content.
+6. If this agent is the first mover, write round 1 immediately in the same response.
+7. Update state, schedule wakeup, and enter polling.
 
 If this agent is not the first mover, stop after prompt/setup. Do not write round 1 on behalf of the first mover. If a local wakeup mechanism is available, schedule a passive recheck so this agent can resume after the first mover updates state; the passive recheck must not create round content until `current_agent` is self.
 

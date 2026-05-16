@@ -1,0 +1,2 @@
+# Runtime chat-mode state, transcripts, wakeup logs, and temp worker output.
+.chat-mode/

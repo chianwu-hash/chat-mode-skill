@@ -61,6 +61,7 @@ Activation must show the mirrored prompt before any long-running work, then cont
 - [ ] Generate the mirrored start line and display it to the user before writing round content.
 - [ ] Write the shared state file with `status: in_progress`, `current_turn: 0`, and `current_agent` set to the first mover.
 - [ ] Create the session file skeleton.
+- [ ] Treat setup as bootstrap only; do not imply round 1 exists until it is present in the session file.
 
 ### If This Agent Is The First Mover
 
@@ -173,12 +174,13 @@ Always reset `current_agent` to `user` when closing.
 ## Known Failure Modes
 
 1. **Mirrored start accidentally changes first mover** - check that the mirrored message names the same first mover as the original.
-2. **Single wait instead of retry loop** - waiting once and reporting back to the user is not enough.
-3. **Non-ASCII state JSON values** - keep task and all state fields in English / ASCII.
-4. **Session closes without resetting current_agent to user** - always set `current_agent: user` on close.
-5. **Polling before other agent finishes** - read the session file to confirm what was done before acting.
-6. **Mistaking content completion for turn completion** - if the first poll has not run, the turn is not complete.
-7. **`session_file` missing or unreadable** - stop and report; do not fall back to another file.
-8. **`current_turn` in state does not match round count in session file** - report mismatch and pause for resolution; do not auto-repair.
-9. **`updated_at` is stale and status is `in_progress`** - if `updated_at` is more than 30 minutes old, surface a warning before writing anything; do not treat it as an automatic stop.
-10. **ScheduleWakeup fires but expected round is absent from session file** - if `current_turn` is N but the session file does not contain a completed Round N, do not infer, continue, or repair; report the mismatch and pause for resolution.
+2. **Mirrored start claims round 1 exists before it is written** - bootstrap only creates state and session files; the current agent must verify the session before continuing.
+3. **Single wait instead of retry loop** - waiting once and reporting back to the user is not enough.
+4. **Non-ASCII state JSON values** - keep task and all state fields in English / ASCII.
+5. **Session closes without resetting current_agent to user** - always set `current_agent: user` on close.
+6. **Polling before other agent finishes** - read the session file to confirm what was done before acting.
+7. **Mistaking content completion for turn completion** - if the first poll has not run, the turn is not complete.
+8. **`session_file` missing or unreadable** - stop and report; do not fall back to another file.
+9. **`current_turn` in state does not match round count in session file** - report mismatch and pause for resolution; do not auto-repair.
+10. **`updated_at` is stale and status is `in_progress`** - if `updated_at` is more than 30 minutes old, surface a warning before writing anything; do not treat it as an automatic stop.
+11. **ScheduleWakeup fires but expected round is absent from session file** - if `current_turn` is N but the session file does not contain a completed Round N, do not infer, continue, or repair; report the mismatch and pause for resolution.

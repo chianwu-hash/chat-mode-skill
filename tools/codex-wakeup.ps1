@@ -20,7 +20,7 @@ param(
     [string]$Sandbox = 'workspace-write'
 )
 
-#requires -Version 7.0
+#requires -Version 7.6.1
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -175,6 +175,8 @@ for ($attempt = $RetryN; $attempt -le $MaxRetries; $attempt++) {
     }
 
     $invokeArgs = @(
+        '--ask-for-approval'
+        'never'
         'exec'
         '-C'
         $RepoPath

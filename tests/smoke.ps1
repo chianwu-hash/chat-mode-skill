@@ -2,7 +2,7 @@ param(
     [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot)
 )
 
-#requires -Version 7.0
+#requires -Version 7.6.1
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -26,8 +26,6 @@ try {
 
     $statePath = Join-Path $fixture '.chat-mode\agent-sync-state.json'
     $promptPath = Join-Path $fixture '.chat-mode\claude-start-prompt.txt'
-    $sessionPath = Join-Path $fixture '.chat-mode\sessions\2026-04-19-smoke-test-topic.md'
-
     if (-not (Test-Path -LiteralPath $statePath)) {
         throw 'State file was not created.'
     }
@@ -58,6 +56,15 @@ try {
     $session = Get-Content -LiteralPath $sessionFullPath -Encoding utf8 -Raw
     if ($session -notmatch '# Session: smoke test topic') {
         throw 'Session file header is missing expected title.'
+    }
+
+    $prompt = Get-Content -LiteralPath $promptPath -Encoding utf8 -Raw
+    if ($prompt -match 'has written round 1') {
+        throw 'Prompt must not claim round 1 was written during bootstrap.'
+    }
+
+    if ($prompt -notmatch 'First mover: codex') {
+        throw 'Prompt is missing the first mover.'
     }
 
     'SMOKE_OK'

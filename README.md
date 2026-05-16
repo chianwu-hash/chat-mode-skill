@@ -62,13 +62,23 @@ The helper scripts default to this host-project layout:
 ```text
 .chat-mode/
   agent-sync-state.json
+  config.json
   sessions/
+  tmp/
   wakeup-logs/
 ```
 
 You can override paths with `-StatePath`, `-SessionDir`, and `-LogDir` where supported.
 
 ## Quick Start
+
+For CLI orchestration, run first setup from Codex so the project records verified CLI paths for this host:
+
+```powershell
+pwsh -NoProfile -File .\tools\chat-mode-setup.ps1
+```
+
+If Claude Code starts first and `.chat-mode/config.json` does not contain a verified `codex_exe`, it should stop and ask the user to run this setup from Codex.
 
 From the host project, start a 4-turn session:
 
@@ -87,15 +97,18 @@ The command creates:
 - `.chat-mode/sessions/YYYY-MM-DD-review-release-plan.md`
 - `.chat-mode/claude-start-prompt.txt` when `-WritePromptFile` is used
 
-Copy the mirrored prompt to Claude Code. If Codex is the first mover, Codex should show the prompt first, then write round 1 in the same response and enter the polling loop.
+Copy the mirrored prompt to Claude Code. The starter only bootstraps the state and session files; it does not write round 1. The agent named by `current_agent` writes the next round. If Codex is the first mover, Codex should show the prompt first, then write round 1 in the same response and enter the polling loop. If Claude Code is the first mover, Codex should stop after prompt/setup or schedule a passive recheck.
 
 ## Protocol Summary
 
 - The state file is the entry point.
 - The `session_file` field points to the active markdown transcript.
 - Round content goes into the session file, not into handoff notes.
+- The starter creates state/session files and leaves `current_agent` set to the first mover.
 - The current agent writes its round, updates state, schedules wakeup, and runs at least the first poll.
 - When the turn limit is reached, set `status=done`, `current_agent=user`, and `stop_reason=turn_limit_reached`.
+
+See [Claude CLI Orchestration Proposal](docs/claude-cli-orchestration.md) for the proposed smoother path where Codex invokes Claude CLI directly and keeps polling as a fallback. The related [CLI Flag Validation](docs/cli-flag-validation.md) and [Worker Prompt Template](docs/worker-prompt-template.md) documents capture the current implementation prerequisites.
 
 ## Status
 
