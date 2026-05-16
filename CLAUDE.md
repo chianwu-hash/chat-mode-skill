@@ -13,6 +13,13 @@ When the user asks to start `chat-mode`, `暢聊模式`, or a bounded multi-roun
 Do not manually roleplay Codex rounds. Do not simulate worker output.
 Do not treat `tests\smoke.ps1` or `tests\run-smoke.ps1` as the chat-mode session. They are test helpers only.
 
+Before checking `.chat-mode/config.json` or starting a session, resolve the chat-mode host repo root:
+
+1. If the user provides a path, `cd` there first when that directory contains `tools\chat-mode-run.ps1`.
+2. Otherwise, use the current working directory only if it contains `tools\chat-mode-run.ps1`.
+3. If the current directory does not contain the runner, search one level down for `*/tools/chat-mode-run.ps1` and use that directory when there is exactly one match.
+4. Report ambiguity instead of falling back to a parent repo's `.chat-mode` directory.
+
 Default command shape:
 
 ```powershell

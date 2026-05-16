@@ -12,6 +12,17 @@ When the user says `chat-mode`, `暢聊模式`, or asks for a bounded Codex/Clau
 
 If `tools/chat-mode-run.ps1` exists, run it. Smoke tests are only verification helpers and are not a substitute for a chat-mode session.
 
+### Host Repo Selection
+
+Before checking `.chat-mode/config.json`, reading state, or starting a new session, resolve the host repo root that owns the runner:
+
+1. If the user gives a path, `cd` to that path when it contains `tools/chat-mode-run.ps1`.
+2. Otherwise, use the current working directory only if it contains `tools/chat-mode-run.ps1`.
+3. If the current directory does not contain the runner, search one directory level down for `*/tools/chat-mode-run.ps1`; if exactly one match exists, `cd` to that directory.
+4. If no runner or multiple runners are found, stop and ask which repo to use.
+
+Do not inspect or reuse a parent repo's `.chat-mode` directory unless that same repo also contains the runner.
+
 ### Preferred Local Runner
 
 If the host project contains `tools/chat-mode-run.ps1` and the user asks for CLI orchestration or a natural-language "chat-mode" / "暢聊模式" run, the runner is mandatory:
