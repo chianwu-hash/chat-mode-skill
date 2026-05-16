@@ -86,6 +86,8 @@ codex --ask-for-approval never exec `
   "Read docs/claude-cli-orchestration.md and summarize the proposed workflow. Do not edit files."
 ```
 
+On Windows, Codex sandbox modes may block file/shell tools with errors such as `CreateProcessAsUserW failed: 5` or sandbox setup refresh failures. The runner defaults Codex to `--dangerously-bypass-approvals-and-sandbox` on Windows for operability, then enforces review-mode behavior by failing if `git diff --stat` or `git status --short` changes.
+
 ## Path Caveat
 
 Codex may be available to Codex-hosted tools but not visible in Claude Code's shell `PATH`. In one Claude-orchestrated test, `codex exec` returned command-not-found while this Codex environment resolved `codex` to:

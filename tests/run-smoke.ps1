@@ -25,7 +25,7 @@ try {
     $fakeClaude = Join-Path $fixture 'claude.ps1'
 
     Set-Content -LiteralPath $fakeCodex -Encoding utf8 -Value @'
-"Codex worker smoke response. Args: $($args.Count)"
+"Codex worker smoke response. Args: $($args -join ' ')"
 exit 0
 '@
 
@@ -81,6 +81,35 @@ exit 0
 
     if ($session -notmatch 'Codex worker smoke response') {
         throw 'Missing Codex worker output.'
+    }
+
+    if ($session -notmatch '--dangerously-bypass-approvals-and-sandbox') {
+        throw 'Expected default Codex invocation to bypass sandbox on this platform.'
+    }
+
+    $resultNoBypass = & $runner `
+        -RepoPath $fixture `
+        -Topic 'runner no bypass smoke test' `
+        -TaskSummary 'runner no bypass smoke test' `
+        -MaxTurns 1 `
+        -FirstMover codex `
+        -CodexBypassSandbox:$false `
+        -CodexSandbox read-only `
+        -NewSession | ConvertFrom-Json
+
+    if ($resultNoBypass.status -ne 'done') {
+        throw "Expected no-bypass setup status done, got $($resultNoBypass.status)."
+    }
+
+    $stateNoBypass = Get-Content -LiteralPath $statePath -Encoding utf8 -Raw | ConvertFrom-Json
+    $sessionNoBypassPath = Join-Path $fixture $stateNoBypass.session_file
+    $sessionNoBypass = Get-Content -LiteralPath $sessionNoBypassPath -Encoding utf8 -Raw
+    if ($sessionNoBypass -notmatch '--ask-for-approval never exec') {
+        throw 'Expected no-bypass Codex invocation to include --ask-for-approval never before exec.'
+    }
+
+    if ($sessionNoBypass -notmatch '--sandbox read-only') {
+        throw 'Expected no-bypass Codex invocation to include --sandbox read-only.'
     }
 
     'RUN_SMOKE_OK'

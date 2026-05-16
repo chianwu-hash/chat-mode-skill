@@ -22,6 +22,11 @@ param(
     [ValidateSet('review', 'suggest')]
     [string]$PermissionProfile = 'review',
 
+    [ValidateSet('read-only', 'workspace-write', 'danger-full-access')]
+    [string]$CodexSandbox = 'workspace-write',
+
+    [Nullable[bool]]$CodexBypassSandbox = $null,
+
     [int]$TimeoutSeconds = 300,
 
     [string]$CodexExe = '',
@@ -304,13 +309,23 @@ function Invoke-Worker {
         )
     }
     else {
-        $invocation = Get-ProcessInvocation -ExePath $script:CodexPath -ToolArgs @(
-            '--ask-for-approval', 'never',
-            'exec',
-            '-C', $RepoPath,
-            '--sandbox', 'read-only',
-            $Prompt
-        )
+        if ($script:EffectiveCodexBypassSandbox) {
+            $invocation = Get-ProcessInvocation -ExePath $script:CodexPath -ToolArgs @(
+                '--dangerously-bypass-approvals-and-sandbox',
+                'exec',
+                '-C', $RepoPath,
+                $Prompt
+            )
+        }
+        else {
+            $invocation = Get-ProcessInvocation -ExePath $script:CodexPath -ToolArgs @(
+                '--ask-for-approval', 'never',
+                'exec',
+                '-C', $RepoPath,
+                '--sandbox', $CodexSandbox,
+                $Prompt
+            )
+        }
     }
 
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
@@ -324,6 +339,10 @@ function Invoke-Worker {
     $startInfo.RedirectStandardError = $true
     $startInfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
     $startInfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+
+    if ($Agent -eq 'claude' -and $startInfo.EnvironmentVariables.ContainsKey('CLAUDECODE')) {
+        $startInfo.EnvironmentVariables.Remove('CLAUDECODE')
+    }
 
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
@@ -414,6 +433,8 @@ function New-OrchestratedState {
         worker_agent = 'both'
         permission_profile = $PermissionProfile
         timeout_seconds = $TimeoutSeconds
+        codex_sandbox = $CodexSandbox
+        codex_bypass_sandbox = $script:EffectiveCodexBypassSandbox
     }
 
     New-SessionDocument -TaskSummaryText $summary -Turns $MaxTurns -StarterAgent $FirstMover -When $now |
@@ -441,6 +462,8 @@ function Get-ActiveState {
 $config = Read-ChatModeConfig
 $script:CodexPath = Get-ConfiguredExe -Config $config -ExplicitValue $CodexExe -ConfigProperty 'codex_exe' -CommandName 'codex'
 $script:ClaudePath = Get-ConfiguredExe -Config $config -ExplicitValue $ClaudeExe -ConfigProperty 'claude_exe' -CommandName 'claude'
+$isWindowsPlatform = if (Get-Variable -Name IsWindows -ErrorAction SilentlyContinue) { $IsWindows } else { $true }
+$script:EffectiveCodexBypassSandbox = if ($null -eq $CodexBypassSandbox) { $isWindowsPlatform } else { [bool]$CodexBypassSandbox }
 
 $tmpDir = Join-Path $RepoPath '.chat-mode\tmp'
 New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
@@ -520,6 +543,7 @@ Invocation:
 - worker: $agent
 - permission_profile: $PermissionProfile
 - timeout_seconds: $TimeoutSeconds
+- codex_sandbox: $(if ($agent -eq 'codex') { if ($script:EffectiveCodexBypassSandbox) { 'bypass' } else { $CodexSandbox } } else { 'n/a' })
 - stdout_temp_file: $(Get-RelativePath -RootPath $RepoPath -FullPath $stdoutPath)
 - stderr_temp_file: $(Get-RelativePath -RootPath $RepoPath -FullPath $stderrPath)
 - exit_code: $($result.ExitCode)

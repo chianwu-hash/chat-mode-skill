@@ -103,6 +103,8 @@ pwsh -NoProfile -File .\tools\chat-mode-run.ps1 `
 
 `chat-mode-run.ps1` calls both worker CLIs as subprocesses, appends each response to the session markdown, and updates state. Do not manually simulate worker rounds when this runner is available.
 
+On Windows, Codex worker calls default to `-CodexBypassSandbox $true` because Codex sandbox modes can block even file reads. Review-mode safety is enforced by the runner comparing `git diff --stat` and `git status --short` before and after each worker call.
+
 From the host project, start a 4-turn session:
 
 ```powershell

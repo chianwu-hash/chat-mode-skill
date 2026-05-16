@@ -31,6 +31,8 @@ If `.chat-mode/config.json` is missing, run `tools/chat-mode-setup.ps1` from Cod
 
 If the runner fails, report the error and stop. Do not continue by roleplaying the missing worker output.
 
+On Windows, Codex worker calls may bypass sandbox even in review mode because Codex sandbox modes can block file inspection. The runner must fail the session if worker execution changes `git diff --stat` or `git status --short`.
+
 ### Priority Rule
 
 In chat-mode, polling is the primary responsibility after each round.

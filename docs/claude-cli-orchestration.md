@@ -128,11 +128,12 @@ pwsh -NoProfile -File .\tools\chat-mode-setup.ps1 `
 Suggested read-only shape:
 
 ```powershell
-& "<codex-exe>" --ask-for-approval never exec `
+& "<codex-exe>" --dangerously-bypass-approvals-and-sandbox exec `
   -C "<repo-root>" `
-  --sandbox read-only `
   "Review the current chat-mode session. Do not edit files."
 ```
+
+On Windows, Codex sandbox modes can block file/shell tools with errors such as `CreateProcessAsUserW failed: 5` or sandbox setup refresh failures. The runner therefore defaults Codex to bypassing sandbox for review-mode operability on Windows, then fails the session if `git diff --stat` or `git status --short` changes.
 
 Suggested workspace-write shape:
 
@@ -394,7 +395,7 @@ Expected result:
 
 ### 3. Codex Read-Only Probe
 
-Run Codex from the repo root with read-only sandbox and ask it to summarize one file.
+Run Codex from the repo root with the runner's default review sandbox and ask it to summarize one file.
 
 ```powershell
 codex --ask-for-approval never exec `
@@ -515,7 +516,7 @@ Start conservatively:
 3. Direct worker writes are not supported in the first pass.
 4. Runner parameters may override `-ClaudeExe` and `-CodexExe`, with config lookup before `PATH` lookup.
 5. Worker prompts are generated from the session markdown and [Worker Prompt Template](worker-prompt-template.md).
-6. Workers run from the repo root with read-only tools and a configurable timeout.
+6. Workers run from the repo root with review-mode tools and a configurable timeout. Codex defaults to sandbox bypass on Windows so it can inspect files; the runner enforces no-mutation behavior with before/after git checks.
 7. Runner creates `.chat-mode/tmp/` and captures stdout/stderr there before transcript append.
 8. Runner appends worker output and invocation metadata to the session markdown.
 9. Runner compares `git diff --stat` and `git status --short` before and after every worker call.

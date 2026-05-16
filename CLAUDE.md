@@ -33,3 +33,5 @@ pwsh -NoProfile -File .\tools\chat-mode-setup.ps1
 If `tools\chat-mode-run.ps1` fails, report the error and stop. Do not continue by pretending to be Codex.
 
 After the runner completes, inspect the session file and state file it reports. Only commit and push when the user requested it and the verification results support doing so.
+
+On Windows, Codex may run with sandbox bypass so it can inspect files. This is still review mode: if the runner reports workspace mutation, stop and do not commit.
