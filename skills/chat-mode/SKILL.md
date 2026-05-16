@@ -6,6 +6,31 @@ Use this skill when the user asks two coding agents, such as Codex and Claude Co
 
 ## Quick Reference
 
+### Trigger Decision
+
+When the user says `chat-mode`, `暢聊模式`, or asks for a bounded Codex/Claude multi-round session, this is a request to run the chat-mode protocol, not just smoke tests.
+
+If `tools/chat-mode-run.ps1` exists, run it. Smoke tests are only verification helpers and are not a substitute for a chat-mode session.
+
+### Preferred Local Runner
+
+If the host project contains `tools/chat-mode-run.ps1` and the user asks for CLI orchestration or a natural-language "chat-mode" / "暢聊模式" run, the runner is mandatory:
+
+```powershell
+pwsh -NoProfile -File .\tools\chat-mode-run.ps1 `
+  -NewSession `
+  -Topic "<task>" `
+  -TaskSummary "<ascii-task-summary>" `
+  -MaxTurns 4 `
+  -FirstMover codex
+```
+
+The runner invokes both worker CLIs as subprocesses, writes the transcript, and updates state. Do not simulate the other agent's rounds when the runner is available. Do not replace the runner with `tests/smoke.ps1` or `tests/run-smoke.ps1`.
+
+If `.chat-mode/config.json` is missing, run `tools/chat-mode-setup.ps1` from Codex first. If setup cannot be run from the current agent, stop and tell the user to start setup from Codex.
+
+If the runner fails, report the error and stop. Do not continue by roleplaying the missing worker output.
+
 ### Priority Rule
 
 In chat-mode, polling is the primary responsibility after each round.

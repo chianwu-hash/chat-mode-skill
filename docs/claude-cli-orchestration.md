@@ -49,12 +49,25 @@ When Claude is the orchestrator:
 
 This mode does not require ScheduleWakeup polling on the happy path because the worker agent is a subprocess, not an independently scheduled peer.
 
+Use `tools/chat-mode-run.ps1` for this mode:
+
+```powershell
+pwsh -NoProfile -File .\tools\chat-mode-run.ps1 `
+  -NewSession `
+  -Topic "<task>" `
+  -TaskSummary "<ascii-task-summary>" `
+  -MaxTurns 4 `
+  -FirstMover claude
+```
+
+When this runner is available, do not manually roleplay the other agent. If a worker CLI cannot be invoked, stop or fall back explicitly; do not simulate worker output.
+
 An orchestrated worker turn is complete only when:
 
 1. The worker CLI exits with code `0`.
 2. Worker stdout is non-empty after trimming whitespace.
 3. Worker stdout has been appended to the session markdown.
-4. A post-call `git diff --stat` check has been recorded.
+4. Post-call `git diff --stat` and `git status --short` checks have been recorded.
 5. The state file has been updated.
 
 If any step fails, stop the session with `status=interrupted`.
@@ -180,7 +193,7 @@ Runner scripts should accept explicit executable path parameters, such as `-Clau
 
 When Claude is the orchestrator and no verified `codex_exe` is available, the runner should stop with the first-run guardrail message instead of falling back to `npx codex` or simulating a Codex response.
 
-All profiles must run a post-call `git diff --stat` check. This is mandatory even for read-only profiles, because it is the simplest way to detect accidental or unexpected workspace mutation.
+All profiles must run post-call `git diff --stat` and `git status --short` checks. This is mandatory even for read-only profiles, because it is the simplest way to detect accidental or unexpected workspace mutation.
 
 ### `review`
 
@@ -497,17 +510,16 @@ After `tools/chat-mode-run.ps1` exists, add tests for:
 
 Start conservatively:
 
-1. Add a new `tools/chat-mode-run.ps1`.
-2. Support `-Mode orchestrated` and `-ClaudePermissionProfile review|suggest`.
-3. Do not support direct Claude writes in the first pass.
-4. Add a setup/discovery command that Codex can run first to write `.chat-mode/config.json` with a verified `codex_exe`.
-5. Accept explicit `-ClaudeExe` and future `-CodexExe` parameters, with config lookup before `PATH` lookup.
-6. Generate a Claude prompt from the session markdown and [Worker Prompt Template](worker-prompt-template.md).
-7. Run `claude -p` from the repo root with read-only tools and a configurable timeout.
-8. Create `.chat-mode/tmp/` and capture stdout there before transcript append.
-9. Append Claude output and invocation metadata to the session markdown.
-10. Run and record `git diff --stat` after every Claude call.
-11. Keep `file-sync` and polling behavior unchanged.
+1. `tools/chat-mode-run.ps1` runs orchestrated sessions.
+2. `tools/chat-mode-setup.ps1` writes `.chat-mode/config.json` with verified CLI paths.
+3. Direct worker writes are not supported in the first pass.
+4. Runner parameters may override `-ClaudeExe` and `-CodexExe`, with config lookup before `PATH` lookup.
+5. Worker prompts are generated from the session markdown and [Worker Prompt Template](worker-prompt-template.md).
+6. Workers run from the repo root with read-only tools and a configurable timeout.
+7. Runner creates `.chat-mode/tmp/` and captures stdout/stderr there before transcript append.
+8. Runner appends worker output and invocation metadata to the session markdown.
+9. Runner compares `git diff --stat` and `git status --short` before and after every worker call.
+10. `file-sync` and polling behavior remain available as fallback.
 
 This gives the project a smoother default path while preserving the older distributed protocol for cases where a direct CLI subprocess is not appropriate.
 

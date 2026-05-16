@@ -72,6 +72,16 @@ You can override paths with `-StatePath`, `-SessionDir`, and `-LogDir` where sup
 
 ## Quick Start
 
+Natural language trigger:
+
+```text
+啟動暢聊模式 4 回合，檢視 chat-mode-skill 是否能順利運作，是否可以 commit+push，你先開始
+```
+
+In this repository, agents should interpret that as a request to use `tools/chat-mode-run.ps1` for real CLI orchestration. They should not manually roleplay the other agent.
+
+Smoke tests such as `tests/smoke.ps1` and `tests/run-smoke.ps1` verify scripts, but they are not the chat-mode session itself.
+
 For CLI orchestration, run first setup from Codex so the project records verified CLI paths for this host:
 
 ```powershell
@@ -79,6 +89,19 @@ pwsh -NoProfile -File .\tools\chat-mode-setup.ps1
 ```
 
 If Claude Code starts first and `.chat-mode/config.json` does not contain a verified `codex_exe`, it should stop and ask the user to run this setup from Codex.
+
+Then run a real 4-turn CLI-orchestrated session:
+
+```powershell
+pwsh -NoProfile -File .\tools\chat-mode-run.ps1 `
+  -NewSession `
+  -Topic "review the release plan" `
+  -TaskSummary "review release plan" `
+  -MaxTurns 4 `
+  -FirstMover claude
+```
+
+`chat-mode-run.ps1` calls both worker CLIs as subprocesses, appends each response to the session markdown, and updates state. Do not manually simulate worker rounds when this runner is available.
 
 From the host project, start a 4-turn session:
 
