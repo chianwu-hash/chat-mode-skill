@@ -105,6 +105,25 @@ pwsh -NoProfile -File .\tools\chat-mode-run.ps1 `
 
 On Windows, Codex worker calls default to `-CodexBypassSandbox $true` because Codex sandbox modes can block even file reads. Review-mode safety is enforced by the runner comparing `git diff --stat` and `git status --short` before and after each worker call.
 
+### Remote SSH Workers
+
+`chat-mode-run.ps1` can run either worker through SSH while keeping orchestration state on the local machine. This is intended for a Windows control machine that invokes Codex or Claude inside a Linux checkout.
+
+```powershell
+pwsh -NoProfile -File .\tools\chat-mode-run.ps1 `
+  -NewSession `
+  -Topic "review remote ssh mode" `
+  -TaskSummary "review remote ssh mode" `
+  -MaxTurns 4 `
+  -FirstMover codex `
+  -CodexTransport ssh `
+  -CodexRemoteHost user@linux-host `
+  -CodexRemoteRepoPath /home/user/project `
+  -CodexRemoteExe codex
+```
+
+Use `-ClaudeTransport ssh` with the matching `-ClaudeRemoteHost`, `-ClaudeRemoteRepoPath`, and `-ClaudeRemoteExe` parameters when Claude should run remotely too. Remote mode requires non-interactive `ssh`, remote `pwsh` 7.6.1+, `git`, a clean local worktree, a clean remote worktree, matching local/remote `HEAD`, and the worker CLI available on the remote host. The runner stages prompt/session/state snapshots remotely, captures stdout/stderr locally, and aborts if the remote worktree changes during a read-only worker call.
+
 From the host project, start a 4-turn session:
 
 ```powershell
