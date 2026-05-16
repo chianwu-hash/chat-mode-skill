@@ -6,7 +6,7 @@
 
 - Codex with local Skill support
 - Claude Code or another second agent that can read and write files in the same host project
-- PowerShell 7+ for the helper scripts
+- PowerShell 7.6.1 or newer for the helper scripts. Use `pwsh`, not Windows PowerShell 5.1 (`powershell.exe`).
 - A host project where both agents can access the same working tree
 
 ## Install
@@ -41,7 +41,7 @@
    .\install.ps1 -ToolsTarget ..\your-host-project\tools
    ```
 
-   The installers check for `git`, `pwsh`, `codex`, and `claude`. They can auto-install `git` and `pwsh` on supported platforms, while `codex` and `claude` remain account-based tools that are reported as warnings when missing.
+   The installers check for `git`, `pwsh`, `codex`, and `claude`. They can auto-install `git` and `pwsh` on supported platforms, while `codex` and `claude` remain account-based tools that are reported as warnings when missing. Project scripts are intended to run under PowerShell 7.6.1+ through `pwsh`.
 
 3. Manual install is also supported. Copy the skill folder into your Codex skills directory.
 
@@ -73,7 +73,7 @@ You can override paths with `-StatePath`, `-SessionDir`, and `-LogDir` where sup
 From the host project, start a 4-turn session:
 
 ```powershell
-.\tools\chat-mode-start.ps1 `
+pwsh -NoProfile -File .\tools\chat-mode-start.ps1 `
   -Topic "review the release plan" `
   -MaxTurns 4 `
   -FirstMover codex `

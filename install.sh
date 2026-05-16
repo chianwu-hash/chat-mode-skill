@@ -2,6 +2,7 @@
 set -euo pipefail
 
 TOOLS_TARGET=""
+MIN_PWSH_VERSION="7.6.1"
 
 usage() {
   cat <<'EOF'
@@ -103,19 +104,28 @@ install_git() {
 
 install_pwsh() {
   local os="$1"
-  if has_cmd pwsh; then
-    echo "[ok] pwsh found: $(command -v pwsh)"
+  if has_cmd pwsh && pwsh -NoProfile -Command "[version]\$PSVersionTable.PSVersion -ge [version]'$MIN_PWSH_VERSION'" | grep -qi '^true$'; then
+    echo "[ok] pwsh $(pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()') found: $(command -v pwsh)"
     return
   fi
 
-  echo "[install] pwsh is missing"
+  if has_cmd pwsh; then
+    echo "[upgrade] pwsh $(pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()') found; upgrading to $MIN_PWSH_VERSION or newer"
+  else
+    echo "[install] pwsh is missing"
+  fi
+
   case "$os" in
     macos)
       if ! has_cmd brew; then
         echo "error: Homebrew is required to auto-install PowerShell on macOS: https://brew.sh/" >&2
         exit 1
       fi
-      brew install --cask powershell
+      if has_cmd pwsh; then
+        brew upgrade --cask powershell
+      else
+        brew install --cask powershell
+      fi
       ;;
     linux)
       if is_debian_like; then
@@ -128,7 +138,11 @@ install_pwsh() {
           echo "Install manually: https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-linux" >&2
           exit 1
         fi
-        sudo snap install powershell --classic
+        if has_cmd pwsh; then
+          sudo snap refresh powershell --classic
+        else
+          sudo snap install powershell --classic
+        fi
       else
         echo "error: automatic PowerShell install is only supported on Ubuntu/Debian and macOS." >&2
         echo "Install manually: https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-linux" >&2
@@ -140,6 +154,13 @@ install_pwsh() {
       exit 1
       ;;
   esac
+
+  if ! has_cmd pwsh || ! pwsh -NoProfile -Command "[version]\$PSVersionTable.PSVersion -ge [version]'$MIN_PWSH_VERSION'" | grep -qi '^true$'; then
+    echo "error: PowerShell $MIN_PWSH_VERSION or newer is required." >&2
+    exit 1
+  fi
+
+  echo "[ok] pwsh $(pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()') found: $(command -v pwsh)"
 }
 
 check_optional_cli() {

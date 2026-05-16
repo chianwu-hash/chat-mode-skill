@@ -8,6 +8,7 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SkillSource = Join-Path $ScriptDir 'skills\chat-mode'
 $ToolsSource = Join-Path $ScriptDir 'tools'
+$MinimumPwshVersion = [version]'7.6.1'
 
 function Test-Command {
     param([string]$Name)
@@ -36,6 +37,51 @@ function Install-WithWinget {
     if (-not (Test-Command $CommandName)) {
         Write-Warning "$CommandName was installed but is not available in this shell yet. Open a new terminal if needed."
     }
+}
+
+function Update-PathFromRegistry {
+    $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $env:Path = "$machinePath;$userPath"
+}
+
+function Get-PwshVersion {
+    if (-not (Test-Command 'pwsh')) {
+        return $null
+    }
+
+    $rawVersion = & pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+    return [version]($rawVersion | Select-Object -First 1)
+}
+
+function Install-OrUpgrade-Pwsh {
+    if (-not (Test-Command winget)) {
+        throw "winget is required to install or upgrade pwsh. Install PowerShell $MinimumPwshVersion or newer manually, then rerun install.ps1."
+    }
+
+    $currentVersion = Get-PwshVersion
+    if ($null -eq $currentVersion) {
+        Write-Host "[install] pwsh is missing; installing Microsoft.PowerShell with winget"
+        winget install --id Microsoft.PowerShell --exact --accept-package-agreements --accept-source-agreements
+    }
+    elseif ($currentVersion -lt $MinimumPwshVersion) {
+        Write-Host "[upgrade] pwsh $currentVersion found; upgrading to $MinimumPwshVersion or newer with winget"
+        winget upgrade --id Microsoft.PowerShell --exact --accept-package-agreements --accept-source-agreements
+    }
+    else {
+        $path = (Get-Command pwsh -ErrorAction Stop).Source
+        Write-Host "[ok] pwsh $currentVersion found: $path"
+        return
+    }
+
+    Update-PathFromRegistry
+    $installedVersion = Get-PwshVersion
+    if ($null -eq $installedVersion -or $installedVersion -lt $MinimumPwshVersion) {
+        throw "PowerShell $MinimumPwshVersion or newer is required, but installed version is $installedVersion."
+    }
+
+    $installedPath = (Get-Command pwsh -ErrorAction Stop).Source
+    Write-Host "[ok] pwsh $installedVersion found: $installedPath"
 }
 
 function Test-OptionalCli {
@@ -85,7 +131,7 @@ if (-not (Test-Path -LiteralPath $SkillSource)) {
 }
 
 Install-WithWinget -CommandName 'git' -PackageId 'Git.Git'
-Install-WithWinget -CommandName 'pwsh' -PackageId 'Microsoft.PowerShell'
+Install-OrUpgrade-Pwsh
 Test-OptionalCli -Name 'codex' -Url 'https://github.com/openai/codex'
 Test-OptionalCli -Name 'claude' -Url 'https://docs.anthropic.com/en/docs/claude-code'
 

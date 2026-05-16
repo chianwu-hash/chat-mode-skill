@@ -20,6 +20,8 @@ param(
     [string]$Sandbox = 'workspace-write'
 )
 
+#requires -Version 7.0
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -108,7 +110,7 @@ function Get-ChainCommand {
         $SandboxMode
     ) | ForEach-Object { "'$_'" }
 
-    return "Start-Process powershell -ArgumentList " + ($parts -join ',')
+    return "Start-Process pwsh -WindowStyle Hidden -ArgumentList " + ($parts -join ',')
 }
 
 function Get-DefaultPrompt {
