@@ -83,8 +83,13 @@ exit 0
         throw 'Missing Codex worker output.'
     }
 
-    if ($session -notmatch '--dangerously-bypass-approvals-and-sandbox') {
-        throw 'Expected default Codex invocation to bypass sandbox on this platform.'
+    $isWindowsPlatform = if (Get-Variable -Name IsWindows -ErrorAction SilentlyContinue) { $IsWindows } else { $true }
+    if ($isWindowsPlatform -and $session -notmatch '--dangerously-bypass-approvals-and-sandbox') {
+        throw 'Expected default Codex invocation to bypass sandbox on Windows.'
+    }
+
+    if (-not $isWindowsPlatform -and $session -notmatch '--ask-for-approval never exec') {
+        throw 'Expected default Codex invocation to use non-bypass exec path on non-Windows platforms.'
     }
 
     $resultNoBypass = & $runner `

@@ -131,9 +131,7 @@ function Get-RelativePath {
 
     $root = [System.IO.Path]::GetFullPath($RootPath)
     $full = [System.IO.Path]::GetFullPath($FullPath)
-    $rootUri = [System.Uri]::new(($root.TrimEnd('\') + '\'))
-    $fullUri = [System.Uri]::new($full)
-    return [System.Uri]::UnescapeDataString($rootUri.MakeRelativeUri($fullUri).ToString()).Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+    return [System.IO.Path]::GetRelativePath($root, $full)
 }
 
 function Resolve-RepoPath {
