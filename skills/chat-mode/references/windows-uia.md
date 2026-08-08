@@ -95,11 +95,13 @@ The action accepts only `review-readonly`, `host-setup-delegated`, or `direct-ma
 
 Some Claude Desktop builds expose `ExpandCollapse` but leave the selector closed. After the primary UIA attempt times out, the helper may focus the uniquely named permission button and send one Space key only when the focused element name, control type, Claude process ID, native window handle, and current foreground window all match. It never activates another window or uses coordinates; any guard mismatch fails closed.
 
-Restore Manual before handback inspection:
+Restore Manual before implementation handback inspection, after host setup, or after a failed or ambiguous review:
 
 ```powershell
 pwsh -NoProfile -File $uia -Action DisableBypass
 ```
+
+Do not call `DisableBypass` after a successful clean `review-readonly` close. Leave Bypass enabled; the next guarded `EnableBypass -BypassContract 'review-readonly'` call verifies and reuses the existing state idempotently.
 
 Approve an exact contract-matching prompt while in `Manual` mode:
 

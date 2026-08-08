@@ -126,7 +126,7 @@ Treat any of the following as a hard stop:
 
 Read the complete Claude document through `TextPattern.DocumentRange`, extract the response associated with the current request, and preserve it in the session transcript. Do not rely on screenshots or OCR for long text.
 
-In review mode, restore `Manual` at session close and verify the repository remains clean with unchanged branch, HEAD, commits, and upstream state. Any mutation rejects the turn. Codex evaluates Claude's recommendations; it does not automatically execute them.
+In review mode, verify the repository remains clean with unchanged branch, HEAD, commits, and upstream state. After a successful clean handback, leave Claude in `Bypass permissions` so the next review can reuse the already-enabled state. On mutation, ambiguity, timeout, malformed completion, or any other failed review, restore `Manual` and reject the turn. Codex evaluates Claude's recommendations; it does not automatically execute them.
 
 In host-setup-delegated mode, restore `Manual` at session close, verify the project repository remains clean with unchanged branch, HEAD, commits, and upstream state, and verify only the recorded host setup state changed. Reject the turn if project files changed, secrets appeared in artifacts, or Claude exceeded the exact command, network, credential, restart, or config authority.
 
@@ -138,7 +138,7 @@ Continue only while the bounded contract permits another turn.
 
 ### 8. Close cleanly
 
-Record the final result and stop reason. Return control to the user. Report the completion marker, changed worktree, branch, diff status, tests, integration status, and any remaining cleanup. Switch Claude back to `Manual` after every chat-mode session. For direct-main-exclusive mode, inspect before running `chat-mode-direct-main.ps1 -Action Close` to archive the handoff metadata. Never delete an isolated worktree or branch automatically.
+Record the final result and stop reason. Return control to the user. Report the completion marker, changed worktree, branch, diff status, tests, integration status, and any remaining cleanup. Keep Claude in `Bypass permissions` only after a successful clean `review-readonly` close. Restore `Manual` after host-setup or implementation handback, after any failed or ambiguous review, or when the user explicitly requests `Manual`. For direct-main-exclusive mode, inspect before running `chat-mode-direct-main.ps1 -Action Close` to archive the handoff metadata. Never delete an isolated worktree or branch automatically.
 
 ## Fallback order
 

@@ -212,7 +212,7 @@ Claude may write `turn-xxxx.response.md` only when the user explicitly authorize
 8. Poll accessible document text for the marker. If the sent prompt includes it, require a second occurrence from Claude's response. Do not infer completion from a settled screenshot or the echoed request.
 9. Enforce the deadline and response-size limit.
 10. Extract Claude's response and append it to the session transcript.
-11. Recheck project status. In review mode, restore `Manual` at session close and reject any status, branch, HEAD, commit, or upstream mutation.
+11. Recheck project status. In review mode, leave Claude in `Bypass permissions` after a successful clean close so later reviews can reuse it. Restore `Manual` and reject the turn on any status, branch, HEAD, commit, or upstream mutation, or on ambiguity, timeout, malformed completion, or another failed review.
 12. In host-setup-delegated mode, restore `Manual`, verify the project repo stayed clean, verify only declared non-secret host setup changed, and confirm no secrets entered chat-mode artifacts.
 13. In isolated-implementer mode, freeze Claude, restore `Manual`, inspect the isolated diff, enforce `write_scope`, reproduce tests, and verify the main worktree stayed clean.
 14. In direct-main-exclusive mode, freeze Claude, restore `Manual`, inspect scope, branch, HEAD, commits, upstream, and full baseline diff before Codex resumes writing.

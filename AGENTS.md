@@ -18,7 +18,8 @@
 - Let Codex verify and approve exact contract-matching prompts through guarded UIA actions. Escalate scope expansion, destructive actions, credentials, production or deployment access, and unexpected network access.
 - Default clean review sessions to `Bypass permissions` under the guarded `review-readonly` contract; keep the mailbox authority read-only and reject any repository mutation.
 - Enable writable `Bypass permissions` only for explicit `direct-main-exclusive` authority and only through the guarded warning-confirmation action.
-- Restore Claude to `Manual` after every chat-mode session ends.
+- After a successful clean `review-readonly` session, leave Claude in `Bypass permissions` so later reviews can reuse it without another mode transition.
+- Restore Claude to `Manual` after implementation or host-setup handback, on review failure or ambiguity, or when the user explicitly requests `Manual`.
 - Never let Codex and Claude edit tracked files in the same worktree concurrently.
 - Enforce the declared `write_scope` before integrating Claude's changes.
 - Approve workspace trust only when the accessible path exactly matches the recorded contract.

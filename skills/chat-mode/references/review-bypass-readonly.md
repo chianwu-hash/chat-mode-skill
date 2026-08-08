@@ -18,7 +18,8 @@ Use this access profile as the default for fast Claude review and discussion. Cl
 - Require a clean Git worktree, named branch, and baseline commit before enabling Bypass.
 - Fall back to `Manual` review when the worktree is dirty, unversioned, detached, or unusually sensitive.
 - Treat any project mutation as a contract violation.
-- Restore `Manual` when the chat-mode session ends.
+- Leave Claude in `Bypass permissions` after a successful clean review so later review sessions can reuse the state.
+- Restore `Manual` on any failed or ambiguous review, or when the user explicitly requests it.
 
 `Bypass permissions` is an application capability, not a read-only sandbox. The read-only boundary comes from the request contract, the clean baseline, and post-turn mutation inspection.
 
@@ -63,7 +64,9 @@ pwsh -NoProfile -File .\skills\chat-mode\scripts\claude-desktop-uia.ps1 `
 
 The helper accepts an already-enabled Bypass state or verifies the fixed warning and confirmation controls before enabling it. Keep the review contract read-only even though the application mode exposes broader capability.
 
-Use Bypass across the bounded turns of the same review session. At session close, restore Manual:
+Use Bypass across bounded turns and later clean review sessions. After a successful review, first complete the mutation check, then leave Claude in Bypass. A later `EnableBypass -BypassContract 'review-readonly'` call is an idempotent guard check and accepts the already-enabled state without opening the selector.
+
+On failure, ambiguity, or an explicit user request for Manual, restore Manual:
 
 ```powershell
 pwsh -NoProfile -File .\skills\chat-mode\scripts\claude-desktop-uia.ps1 `
