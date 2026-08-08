@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('List', 'Expand', 'Select', 'Invoke', 'ApprovePrompt', 'ApproveWorkspaceTrust', 'ReadDocument', 'WaitText')]
+    [ValidateSet('List', 'Expand', 'Select', 'Invoke', 'ApprovePrompt', 'ApproveWorkspaceTrust', 'EnableBypass', 'DisableBypass', 'ReadDocument', 'WaitText')]
     [string]$Action = 'List',
 
     [string]$ProcessName = 'claude',
@@ -16,7 +16,12 @@ param(
     [ValidateRange(1, 30)]
     [int]$PollSeconds = 5,
 
-    [string]$TextRegex = ''
+    [ValidateRange(1, 10)]
+    [int]$MinimumTextMatches = 1,
+
+    [string]$TextRegex = '',
+
+    [string]$BypassContract = ''
 )
 
 Set-StrictMode -Version Latest
@@ -166,6 +171,23 @@ function Invoke-Element {
     $invokePattern.Invoke()
 }
 
+function Select-Element {
+    param([System.Windows.Automation.AutomationElement]$Element)
+
+    $selectionPattern = $null
+    if (-not $Element.TryGetCurrentPattern(
+            [System.Windows.Automation.SelectionItemPattern]::Pattern,
+            [ref]$selectionPattern
+        )) {
+        throw "Control '$($Element.Current.Name)' does not support SelectionItem."
+    }
+    if (-not $Element.Current.IsEnabled -or $Element.Current.IsOffscreen) {
+        throw "Control '$($Element.Current.Name)' is not available."
+    }
+
+    $selectionPattern.Select()
+}
+
 function Assert-SpecificTextRegex {
     param([string]$Pattern)
 
@@ -209,21 +231,19 @@ switch ($Action) {
             )) {
             throw "Control '$($element.Current.Name)' does not support ExpandCollapse."
         }
-        $expandPattern.Expand()
+        if (
+            $expandPattern.Current.ExpandCollapseState -eq
+            [System.Windows.Automation.ExpandCollapseState]::Collapsed
+        ) {
+            $expandPattern.Expand()
+        }
         Write-Output "expanded: $($element.Current.Name)"
         break
     }
 
     'Select' {
         $element = Get-UniqueElement -Root $root -Pattern $NameRegex -ExpectedType $ControlType
-        $selectionPattern = $null
-        if (-not $element.TryGetCurrentPattern(
-                [System.Windows.Automation.SelectionItemPattern]::Pattern,
-                [ref]$selectionPattern
-            )) {
-            throw "Control '$($element.Current.Name)' does not support SelectionItem."
-        }
-        $selectionPattern.Select()
+        Select-Element -Element $element
         Write-Output "selected: $($element.Current.Name)"
         break
     }
@@ -309,6 +329,149 @@ switch ($Action) {
         break
     }
 
+    'EnableBypass' {
+        if ($BypassContract -ne 'direct-main-exclusive') {
+            throw "EnableBypass requires -BypassContract 'direct-main-exclusive'."
+        }
+
+        $currentMode = Get-UniqueElement `
+            -Root $root `
+            -Pattern '^(?:Manual|Accept edits)$' `
+            -ExpectedType 'Button'
+        $expandPattern = $null
+        if (-not $currentMode.TryGetCurrentPattern(
+                [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
+                [ref]$expandPattern
+            )) {
+            throw "Control '$($currentMode.Current.Name)' does not support ExpandCollapse."
+        }
+        if (
+            $expandPattern.Current.ExpandCollapseState -eq
+            [System.Windows.Automation.ExpandCollapseState]::Collapsed
+        ) {
+            $expandPattern.Expand()
+        }
+
+        $deadline = [DateTimeOffset]::UtcNow.AddSeconds(5)
+        do {
+            $bypassOptions = @(Get-MatchingElements `
+                    -Root $root `
+                    -Pattern '^Bypass permissions\b' `
+                    -ExpectedType 'RadioButton')
+            if ($bypassOptions.Count -gt 0) {
+                break
+            }
+            Start-Sleep -Milliseconds 250
+        } while ([DateTimeOffset]::UtcNow -lt $deadline)
+
+        if ($bypassOptions.Count -ne 1) {
+            throw "Expected one Bypass permission option, found $($bypassOptions.Count)."
+        }
+        $bypassOption = $bypassOptions[0]
+        Select-Element -Element $bypassOption
+
+        $deadline = [DateTimeOffset]::UtcNow.AddSeconds(5)
+        do {
+            $confirmButtons = @(Get-MatchingElements `
+                    -Root $root `
+                    -Pattern '^Bypass permissions$' `
+                    -ExpectedType 'Button')
+            if ($confirmButtons.Count -gt 0) {
+                break
+            }
+            Start-Sleep -Milliseconds 250
+        } while ([DateTimeOffset]::UtcNow -lt $deadline)
+
+        if ($confirmButtons.Count -ne 1) {
+            throw "Expected one Bypass confirmation button, found $($confirmButtons.Count)."
+        }
+
+        $titles = @(Get-MatchingElements `
+                -Root $root `
+                -Pattern '^Bypass all permissions\?$' `
+                -ExpectedType 'Any')
+        if ($titles.Count -eq 0) {
+            throw 'Bypass confirmation title is missing.'
+        }
+        $warning = Get-UniqueElement `
+            -Root $root `
+            -Pattern '^Claude will read, edit, and execute files without asking' `
+            -ExpectedType 'Text'
+        if (-not $warning.Current.IsEnabled -or $warning.Current.IsOffscreen) {
+            throw 'Bypass warning text is not available.'
+        }
+        $cancel = Get-UniqueElement `
+            -Root $root `
+            -Pattern '^Cancel$' `
+            -ExpectedType 'Button'
+        if (-not $cancel.Current.IsEnabled -or $cancel.Current.IsOffscreen) {
+            throw 'Bypass Cancel control is not available.'
+        }
+
+        Invoke-Element -Element $confirmButtons[0]
+        Start-Sleep -Milliseconds 500
+        $null = Get-UniqueElement `
+            -Root $root `
+            -Pattern '^Bypass permissions$' `
+            -ExpectedType 'Button'
+        Write-Output 'enabled: Bypass permissions'
+        break
+    }
+
+    'DisableBypass' {
+        $currentMode = Get-UniqueElement `
+            -Root $root `
+            -Pattern '^Bypass permissions$' `
+            -ExpectedType 'Button'
+        $expandPattern = $null
+        if (-not $currentMode.TryGetCurrentPattern(
+                [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
+                [ref]$expandPattern
+            )) {
+            throw "Control '$($currentMode.Current.Name)' does not support ExpandCollapse."
+        }
+        if (
+            $expandPattern.Current.ExpandCollapseState -eq
+            [System.Windows.Automation.ExpandCollapseState]::Collapsed
+        ) {
+            $expandPattern.Expand()
+        }
+
+        $deadline = [DateTimeOffset]::UtcNow.AddSeconds(5)
+        do {
+            $manualOptions = @(Get-MatchingElements `
+                    -Root $root `
+                    -Pattern '^Manual\b' `
+                    -ExpectedType 'RadioButton')
+            if ($manualOptions.Count -gt 0) {
+                break
+            }
+            Start-Sleep -Milliseconds 250
+        } while ([DateTimeOffset]::UtcNow -lt $deadline)
+        if ($manualOptions.Count -ne 1) {
+            throw "Expected one Manual option, found $($manualOptions.Count)."
+        }
+        $manual = $manualOptions[0]
+        Select-Element -Element $manual
+
+        $deadline = [DateTimeOffset]::UtcNow.AddSeconds(5)
+        do {
+            $manualButtons = @(Get-MatchingElements `
+                    -Root $root `
+                    -Pattern '^Manual$' `
+                    -ExpectedType 'Button')
+            if ($manualButtons.Count -gt 0) {
+                break
+            }
+            Start-Sleep -Milliseconds 250
+        } while ([DateTimeOffset]::UtcNow -lt $deadline)
+        if ($manualButtons.Count -ne 1) {
+            throw "Expected one Manual mode button, found $($manualButtons.Count)."
+        }
+        Write-Output 'disabled Bypass permissions; selected: Manual'
+        break
+    }
+
     'ReadDocument' {
         Write-Output (Get-DocumentText -Root $root)
         break
@@ -322,13 +485,14 @@ switch ($Action) {
         $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
         do {
             $document = Get-DocumentText -Root $root
-            if ([regex]::IsMatch($document, $TextRegex)) {
+            $matchCount = [regex]::Matches($document, $TextRegex).Count
+            if ($matchCount -ge $MinimumTextMatches) {
                 Write-Output $document
                 exit 0
             }
             Start-Sleep -Seconds $PollSeconds
         } while ([DateTimeOffset]::UtcNow -lt $deadline)
 
-        throw "Timed out after $TimeoutSeconds seconds waiting for /$TextRegex/."
+        throw "Timed out after $TimeoutSeconds seconds waiting for $MinimumTextMatches matches of /$TextRegex/."
     }
 }

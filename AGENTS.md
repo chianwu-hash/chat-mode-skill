@@ -10,12 +10,14 @@
 
 - Use the filesystem mailbox plus Windows UI Automation workflow documented by the skill.
 - Do not recreate or call the retired root `tools/` runner.
-- Keep Claude read-only unless the user explicitly authorizes isolated-implementer mode.
+- Keep Claude read-only unless the user explicitly authorizes an implementation mode.
 - For isolated implementation, require a clean main worktree and use the bundled worktree helper.
+- For explicit non-isolated access, require a clean main worktree and use `chat-mode-direct-main.ps1`; Claude becomes the exclusive writer until inspected handback.
 - Treat the user's task as delegated authority for necessary project-local reads, in-scope writes, and declared validation commands.
 - Record the exact worktree, branch, base commit, `write_scope`, and authorized actions and commands; set Claude to `Accept edits` without a second confirmation when they remain inside the original request.
 - Let Codex verify and approve exact contract-matching prompts through guarded UIA actions. Escalate scope expansion, destructive actions, credentials, production or deployment access, and unexpected network access.
-- Restore Claude to `Manual` after the isolated session ends.
+- Enable `Bypass permissions` only for explicit `direct-main-exclusive` authority and only through the guarded warning-confirmation action.
+- Restore Claude to `Manual` after every implementation session ends.
 - Never let Codex and Claude edit tracked files in the same worktree concurrently.
 - Enforce the declared `write_scope` before integrating Claude's changes.
 - Approve workspace trust only when the accessible path exactly matches the recorded contract.
@@ -29,3 +31,4 @@
 - Validate `skills/chat-mode` with the skill-creator validator before committing.
 - Test UIA changes with read-only actions against Claude Desktop when available.
 - Run `pwsh -NoProfile -File .\tests\worktree-smoke.ps1` after changing isolated-worktree behavior.
+- Run `pwsh -NoProfile -File .\tests\direct-main-smoke.ps1` after changing direct-main behavior.

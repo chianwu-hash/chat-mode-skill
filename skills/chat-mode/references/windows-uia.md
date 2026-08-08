@@ -12,6 +12,8 @@ The 2026-08-08 smoke test confirmed these Claude Desktop patterns:
 | Model option, such as `Opus 5 2` | RadioButton | SelectionItem |
 | Current permission mode | Button | ExpandCollapse |
 | `Manual , Always ask before making changes 1` | RadioButton | SelectionItem |
+| `Bypass permissions , Accepts all permissions 5` | RadioButton | SelectionItem |
+| `Bypass permissions` confirmation | Button | Invoke |
 | `Allow once` | Button | Invoke |
 | `Deny` | Button | Invoke |
 | `Send` | Button | Invoke |
@@ -61,6 +63,22 @@ pwsh -NoProfile -File $uia -Action Expand -NameRegex '^Accept edits$' -ControlTy
 pwsh -NoProfile -File $uia -Action Select -NameRegex '^Manual\b' -ControlType RadioButton
 ```
 
+For an explicitly authorized direct-main-exclusive session, enable Bypass with one guarded action:
+
+```powershell
+pwsh -NoProfile -File $uia `
+  -Action EnableBypass `
+  -BypassContract 'direct-main-exclusive'
+```
+
+The action requires the exact Bypass radio option, the `Bypass all permissions?` dialog, Claude's warning that it may execute destructive commands, one visible Cancel button, and one visible Bypass confirmation button. It then verifies that the current mode is `Bypass permissions`. Do not use generic `Select` plus `Invoke` for this flow.
+
+Restore Manual before handback inspection:
+
+```powershell
+pwsh -NoProfile -File $uia -Action DisableBypass
+```
+
 Approve an exact contract-matching prompt while in `Manual` mode:
 
 ```powershell
@@ -100,11 +118,12 @@ Check for a completion marker without holding a single wait longer than 60 secon
 ```powershell
 pwsh -NoProfile -File $uia -Action WaitText `
   -TextRegex 'CHAT_MOD_20260808_0001_DONE' `
+  -MinimumTextMatches 2 `
   -TimeoutSeconds 45 `
   -PollSeconds 5
 ```
 
-Repeat bounded waits while keeping the user informed.
+Use two matches when the user's sent prompt contains the marker: one occurrence belongs to the request and the second must come from Claude's response. Repeat bounded waits while keeping the user informed.
 
 ## Fail-safe behavior
 
@@ -115,6 +134,8 @@ The helper fails when:
 - multiple controls match;
 - prompt text does not match the caller's contract-specific expression;
 - the expected paired deny or cancel control is absent;
+- Bypass is requested without the exact direct-main-exclusive acknowledgement;
+- Claude's Bypass warning or confirmation dialog differs from the tested UI;
 - the requested UIA pattern is unsupported;
 - the document or marker is unavailable;
 - the timeout expires.
@@ -124,6 +145,7 @@ Inspect the accessibility tree again after Claude updates its UI. Do not substit
 ## Known limits
 
 - Codex can approve contract-matching prompts, but accessible text is an application-level guard rather than an OS security boundary.
+- Bypass suppresses Claude permission prompts and may permit destructive or external actions; UIA confirmation does not contain that authority.
 - Claude may rename accessible controls in future releases.
 - Some GPU-rendered surfaces can produce black screenshots even while UIA remains available.
 - A locked Windows session, detached RDP session, or app update may suspend UIA behavior.

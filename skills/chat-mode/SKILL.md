@@ -1,11 +1,11 @@
 ---
 name: chat-mode
-description: Coordinate bounded Codex and Claude Desktop collaboration on Windows through a filesystem mailbox and background Windows UI Automation, including read-only review and isolated Git-worktree implementation. Use when the user asks for chat-mode, 暢聊模式, Codex/Claude discussion or review, Claude-assisted large file or code changes, or background Claude Desktop operation.
+description: Coordinate bounded Codex and Claude Desktop collaboration on Windows through a filesystem mailbox and background Windows UI Automation, including read-only review, isolated Git-worktree implementation, and explicitly authorized direct main-worktree handoff. Use when the user asks for chat-mode, 暢聊模式, Codex/Claude discussion or review, Claude-assisted large file or code changes, equal AI assistant access, non-isolated Claude operation, or background Claude Desktop operation.
 ---
 
 # Chat Mode
 
-Run Codex as the orchestrator and Claude Desktop Code as either a bounded reviewer or an explicitly authorized isolated implementer. Keep the user's desktop available by controlling Claude through Windows UI Automation (UIA), not screen coordinates.
+Run Codex as the orchestrator and Claude Desktop Code as a bounded reviewer, isolated implementer, or explicitly authorized exclusive writer of the current main worktree. Keep the user's desktop available by controlling Claude through Windows UI Automation (UIA), not screen coordinates.
 
 ## Core rules
 
@@ -14,12 +14,12 @@ Run Codex as the orchestrator and Claude Desktop Code as either a bounded review
 3. Treat the user's task as delegated authority for necessary project-local reads, in-scope writes, and declared validation. Let Codex verify and approve matching Claude prompts; ask the user only when authority would expand or risk materially changes.
 4. For review or discussion, set Claude to `Manual` and explicitly forbid edits, commits, pushes, and destructive commands.
 5. Bound every session by turns, time, and response size. Default to 3 turns and a 5-minute limit per Claude turn.
-6. Use one writer per working tree. In review mode, Codex is the sole project writer. In isolated-implementer mode, Claude writes only in its dedicated worktree while the main worktree remains untouched.
-7. Require a Git repository, clean main worktree, baseline commit, dedicated branch, explicit `write_scope`, and authorized action and command sets before isolated implementation.
+6. Use one writer per working tree. In review mode, Codex is the sole project writer. In implementation modes, hand the selected working tree exclusively to Claude and freeze Codex writes until handback.
+7. Require a Git repository, clean selected worktree, baseline commit and branch, explicit `write_scope`, and authorized action and command sets before implementation.
 
 Read [references/protocol.md](references/protocol.md) before starting a real session. On Windows, read [references/windows-uia.md](references/windows-uia.md) before controlling Claude Desktop.
 
-When the user asks Claude to modify files, read [references/isolated-implementer.md](references/isolated-implementer.md) before creating a worktree or granting write access.
+When the user asks Claude to modify files, read [references/isolated-implementer.md](references/isolated-implementer.md) before creating an isolated worktree. When the user explicitly requests the same main worktree, no isolation, equal project access, or Bypass on main, read [references/direct-main-exclusive.md](references/direct-main-exclusive.md) before granting write access.
 
 ## Workflow
 
@@ -30,7 +30,7 @@ Confirm or infer:
 - repository root;
 - task and Claude's role;
 - maximum turns and per-turn timeout;
-- `review` or `isolated-implementer` mode;
+- `review`, `isolated-implementer`, or `direct-main-exclusive` mode;
 - write scope when implementation is requested;
 - actions and commands delegated by the user's request;
 - completion marker unique to the turn.
@@ -43,6 +43,8 @@ For review mode, use the main repository and keep Claude read-only.
 
 For isolated-implementer mode, require explicit user intent, then use `scripts/chat-mode-worktree.ps1 -Action Prepare` with one or more `-WriteScope` patterns. Open the resulting sibling worktree in Claude. Do not let Claude write in the main worktree and do not let Codex edit tracked files in Claude's worktree during its turn.
 
+For direct-main-exclusive mode, require explicit user intent to skip isolation and grant Claude equivalent task-level project access. Use `scripts/chat-mode-direct-main.ps1 -Action Prepare` against the clean main worktree. Record the baseline branch, commit, upstream, scope, actions, and commands. Freeze all Codex writes and Git operations in that worktree until Claude hands it back.
+
 ### 3. Prepare a durable request
 
 Create a request under:
@@ -53,7 +55,7 @@ Create a request under:
 
 Include the envelope defined in the protocol reference. Keep `.chat-mode/` ignored by Git.
 
-In isolated-implementer mode, place the request in the isolated worktree's `.chat-mode/exchange/` directory and include the absolute worktree path, branch, base commit, and `write_scope`.
+In either implementation mode, place the request in the selected worktree's `.chat-mode/exchange/` directory and include its absolute path, branch, base commit, `write_scope`, and explicit Git, network, credential, deployment, and external-path authority.
 
 For a minimal session, Claude may answer in its chat while ending with the unique marker. For very large responses, request a response file only when the user has authorized Claude to write inside the exchange directory.
 
@@ -71,7 +73,7 @@ The poke should be short, for example:
 Read .chat-mode/exchange/<session-id>/turn-0001.request.md, follow its contract, respond here, and end with <marker>.
 ```
 
-Use the main repository as `folder` for review mode and the isolated worktree as `folder` for implementation mode.
+Use the main repository as `folder` for review and direct-main-exclusive modes, and the isolated worktree as `folder` for isolated implementation.
 
 If Claude displays `Trust this workspace?`, compare the accessible path with the exact repository or isolated worktree in the contract. Use the guarded `ApproveWorkspaceTrust` action when it matches uniquely. Stop and ask the user on mismatch or ambiguity.
 
@@ -84,17 +86,18 @@ Use `scripts/claude-desktop-uia.ps1` or equivalent native UIA calls.
 - Set `Manual` for discussion and review.
 - Record and report the exact worktree path, branch, base commit, `write_scope`, and authorized actions and commands before implementation.
 - When the user's task already authorizes those in-scope writes, set `Accept edits` for the isolated Claude session without requesting another confirmation.
+- Only when the user explicitly authorizes direct non-isolated access, use `EnableBypass -BypassContract direct-main-exclusive`. Verify Claude's fixed destructive-command warning and confirmation controls through UIA.
 - Keep `Manual` when the user requests per-edit confirmation or the repository is unusually sensitive.
 - Identify controls by accessible name and control type.
 - Fail on zero or multiple matches instead of guessing.
 
 Do not use hard-coded screen coordinates unless the user explicitly accepts a fragile, visible fallback.
 
-`Accept edits` is not an OS-level path sandbox. It permits file edits in the trusted Claude workspace; isolation and post-turn `write_scope` inspection bound the risk. Never use `Bypass permissions` as the default.
+Neither `Accept edits` nor `Bypass permissions` is an OS-level path sandbox. Use Bypass only for an explicit direct-main-exclusive contract, never as the inferred default. Textual scope and post-turn inspection detect violations but cannot prevent external access.
 
 ### 6. Send and monitor
 
-Invoke the accessible `Send` button. Poll the Claude document text for the unique completion marker in intervals shorter than 60 seconds. Share progress with the user between waits.
+Invoke the accessible `Send` button. Poll the Claude document text for the unique completion marker in intervals shorter than 60 seconds. When the sent prompt contains the marker, require at least two document matches so the echoed request cannot masquerade as Claude's handback. Share progress with the user between waits.
 
 When Claude opens a permission prompt, compare its accessible text with the recorded contract. Use `ApprovePrompt` only for an exact, expected action and only when the helper finds one `Allow once` and one `Deny` control. This may include in-scope file access or a validation command already authorized by the task. Reject or escalate prompts for Git operations assigned to Codex, out-of-scope paths, undeclared commands, credentials, production or deployment access, destructive actions, or unexpected network access.
 
@@ -104,7 +107,7 @@ Treat any of the following as a hard stop:
 - malformed or missing marker;
 - focus-sensitive behavior that could type into the wrong application;
 - timeout or output-size limit;
-- unexpected main-worktree mutation or isolated-worktree writes outside `write_scope`;
+- mutation outside the active writer's selected worktree or writes outside `write_scope`;
 - user-created `.chat-mode/STOP` file.
 
 ### 7. Bring the result back
@@ -115,11 +118,13 @@ In review mode, Codex evaluates Claude's recommendations; it does not automatica
 
 In isolated-implementer mode, freeze Claude's turn and run `scripts/chat-mode-worktree.ps1 -Action Inspect`. Require `ScopePassed`, review every changed path and the complete diff, reproduce tests, and verify the main worktree stayed clean. A completion marker is not permission to integrate. Apply or cherry-pick only within the user's original modification authority.
 
+In direct-main-exclusive mode, freeze Claude's turn, immediately run `scripts/chat-mode-direct-main.ps1 -Action Inspect`, and review scope, branch, HEAD, commits, upstream state, tracked and untracked paths, and the full baseline diff. Accept only changes and Git operations authorized by the original task. Codex resumes writing only after inspection and handback.
+
 Continue only while the bounded contract permits another turn.
 
 ### 8. Close cleanly
 
-Record the final result and stop reason. Return control to the user. Report the completion marker, changed worktree, branch, diff status, tests, integration status, and any remaining cleanup. Switch the Claude session back to `Manual` after isolated implementation ends. Never delete an isolated worktree or branch automatically.
+Record the final result and stop reason. Return control to the user. Report the completion marker, changed worktree, branch, diff status, tests, integration status, and any remaining cleanup. Switch Claude back to `Manual` after every implementation session. For direct-main-exclusive mode, inspect before running `chat-mode-direct-main.ps1 -Action Close` to archive the handoff metadata. Never delete an isolated worktree or branch automatically.
 
 ## Fallback order
 
