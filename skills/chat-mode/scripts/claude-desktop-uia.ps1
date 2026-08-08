@@ -444,10 +444,11 @@ switch ($Action) {
     'EnableBypass' {
         $allowedBypassContracts = @(
             'review-readonly'
+            'host-setup-delegated'
             'direct-main-exclusive'
         )
         if ($BypassContract -notin $allowedBypassContracts) {
-            throw 'EnableBypass requires -BypassContract review-readonly or direct-main-exclusive.'
+            throw 'EnableBypass requires -BypassContract review-readonly, host-setup-delegated, or direct-main-exclusive.'
         }
 
         $currentMode = Get-UniqueElement `

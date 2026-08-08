@@ -16,10 +16,13 @@ Run Codex as the orchestrator and Claude Desktop Code as a bounded reviewer, iso
 5. Bound every session by turns, time, and response size. Default to 3 turns and a 5-minute limit per Claude turn.
 6. Use one writer per working tree. In review mode, Codex is the sole project writer. In implementation modes, hand the selected working tree exclusively to Claude and freeze Codex writes until handback.
 7. Require a Git repository, clean selected worktree, baseline commit and branch, explicit `write_scope`, and authorized action and command sets before implementation.
+8. For host setup, plugin installation, or machine-level configuration, use the guarded `host-setup-delegated` Bypass contract only when the user explicitly asks Claude to perform the setup. It must list exact non-secret commands and config writes, keep credential handling with the user or local UI, and forbid secrets in chat, request files, transcripts, and Memory.
 
 Read [references/protocol.md](references/protocol.md) before starting a real session. On Windows, read [references/windows-uia.md](references/windows-uia.md) before controlling Claude Desktop.
 
 When the user asks for review or discussion, read [references/review-bypass-readonly.md](references/review-bypass-readonly.md) before enabling the default read-only Bypass profile.
+
+When the user asks Claude to install plugins, configure host tools, or perform machine-level setup without project file edits, read [references/host-setup-delegated.md](references/host-setup-delegated.md) before enabling guarded setup Bypass.
 
 When the user asks Claude to modify files, read [references/isolated-implementer.md](references/isolated-implementer.md) before creating an isolated worktree. When the user explicitly requests the same main worktree, no isolation, equal project access, or Bypass on main, read [references/direct-main-exclusive.md](references/direct-main-exclusive.md) before granting write access.
 
@@ -32,16 +35,20 @@ Confirm or infer:
 - repository root;
 - task and Claude's role;
 - maximum turns and per-turn timeout;
-- `review`, `isolated-implementer`, or `direct-main-exclusive` mode;
+- `review`, `host-setup-delegated`, `isolated-implementer`, or `direct-main-exclusive` mode;
 - write scope when implementation is requested;
 - actions and commands delegated by the user's request;
 - completion marker unique to the turn.
 
 Default to `review` with a read-only mailbox contract and the guarded `review-readonly` Bypass profile. Do not confuse Claude Desktop's permission UI with task authority, and do not expand authority merely to keep the loop moving.
 
+Use `host-setup-delegated` only for user-requested host setup such as installing a Claude plugin or configuring a local tool. This mode may authorize exact setup commands and non-secret config writes, but it must not authorize project edits, Git mutation, deployment, destructive commands, or credential disclosure.
+
 ### 2. Select the working tree
 
 For review mode, use the main repository and keep Claude contractually read-only. Require a clean Git baseline for the default Bypass profile so any mutation is detectable. Fall back to `Manual` review when the worktree is dirty, unversioned, detached, or unusually sensitive.
+
+For host-setup-delegated mode, use the repository only as an orchestration anchor and keep project files read-only. Require a clean Git baseline so project mutation is detectable. Record exact host setup targets, commands, non-secret config paths, restart authority, network hosts, and credential boundaries. Keep Access Anywhere URLs, API keys, passwords, tokens, and private keys out of all chat-mode artifacts.
 
 For isolated-implementer mode, require explicit user intent, then use `scripts/chat-mode-worktree.ps1 -Action Prepare` with one or more `-WriteScope` patterns. Open the resulting sibling worktree in Claude. Do not let Claude write in the main worktree and do not let Codex edit tracked files in Claude's worktree during its turn.
 
@@ -56,6 +63,8 @@ Create a request under:
 ```
 
 Include the envelope defined in the protocol reference. Keep `.chat-mode/` ignored by Git.
+
+In host setup mode, place the request in the main repository's `.chat-mode/exchange/` directory and include exact setup scope, authorized commands, non-secret config paths, allowed network hosts, credential handling instructions, and restart authority. Do not place secrets or remote access URLs in the request.
 
 In either implementation mode, place the request in the selected worktree's `.chat-mode/exchange/` directory and include its absolute path, branch, base commit, `write_scope`, and explicit Git, network, credential, deployment, and external-path authority.
 
@@ -75,7 +84,7 @@ The poke should be short, for example:
 Read .chat-mode/exchange/<session-id>/turn-0001.request.md, follow its contract, respond here, and end with <marker>.
 ```
 
-Use the main repository as `folder` for review and direct-main-exclusive modes, and the isolated worktree as `folder` for isolated implementation.
+Use the main repository as `folder` for review, host-setup-delegated, and direct-main-exclusive modes, and the isolated worktree as `folder` for isolated implementation.
 
 If Claude displays `Trust this workspace?`, compare the accessible path with the exact repository or isolated worktree in the contract. Use the guarded `ApproveWorkspaceTrust` action when it matches uniquely. Stop and ask the user on mismatch or ambiguity.
 
@@ -86,6 +95,7 @@ Use `scripts/claude-desktop-uia.ps1` or equivalent native UIA calls.
 - Select the strongest available Opus model for the first architecture or adversarial review.
 - Use Sonnet for repeated routine turns when speed or usage matters.
 - For clean review and discussion sessions, use `EnableBypass -BypassContract review-readonly` by default. Record the clean branch, HEAD, upstream state, read-only actions, and declared inspection commands first.
+- For user-authorized host setup, use `EnableBypass -BypassContract host-setup-delegated` only after recording the clean project baseline, exact setup commands, non-secret config paths, allowed network hosts, credential boundaries, and restart authority.
 - Record and report the exact worktree path, branch, base commit, `write_scope`, and authorized actions and commands before implementation.
 - When the user's task already authorizes those in-scope writes, set `Accept edits` for the isolated Claude session without requesting another confirmation.
 - Only when the user explicitly authorizes direct non-isolated access, use `EnableBypass -BypassContract direct-main-exclusive`. Verify Claude's fixed destructive-command warning and confirmation controls through UIA.
@@ -95,7 +105,7 @@ Use `scripts/claude-desktop-uia.ps1` or equivalent native UIA calls.
 
 Do not use hard-coded screen coordinates unless the user explicitly accepts a fragile, visible fallback.
 
-Neither `Accept edits` nor `Bypass permissions` is an OS-level path sandbox. Use Bypass only with the guarded `review-readonly` or `direct-main-exclusive` contract. The review profile is contractually read-only even though the UI mode is capable of mutation. Clean baselines, textual scope, and post-turn inspection detect violations but cannot prevent external access.
+Neither `Accept edits` nor `Bypass permissions` is an OS-level path sandbox. Use Bypass only with the guarded `review-readonly`, `host-setup-delegated`, or `direct-main-exclusive` contract. The review profile is contractually read-only even though the UI mode is capable of mutation. Clean baselines, textual scope, and post-turn inspection detect violations but cannot prevent external access.
 
 ### 6. Send and monitor
 
@@ -117,6 +127,8 @@ Treat any of the following as a hard stop:
 Read the complete Claude document through `TextPattern.DocumentRange`, extract the response associated with the current request, and preserve it in the session transcript. Do not rely on screenshots or OCR for long text.
 
 In review mode, restore `Manual` at session close and verify the repository remains clean with unchanged branch, HEAD, commits, and upstream state. Any mutation rejects the turn. Codex evaluates Claude's recommendations; it does not automatically execute them.
+
+In host-setup-delegated mode, restore `Manual` at session close, verify the project repository remains clean with unchanged branch, HEAD, commits, and upstream state, and verify only the recorded host setup state changed. Reject the turn if project files changed, secrets appeared in artifacts, or Claude exceeded the exact command, network, credential, restart, or config authority.
 
 In isolated-implementer mode, freeze Claude's turn and run `scripts/chat-mode-worktree.ps1 -Action Inspect`. Require `ScopePassed`, review every changed path and the complete diff, reproduce tests, and verify the main worktree stayed clean. A completion marker is not permission to integrate. Apply or cherry-pick only within the user's original modification authority.
 

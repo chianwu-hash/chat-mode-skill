@@ -73,6 +73,16 @@ pwsh -NoProfile -File $uia `
 
 This suppresses Claude permission prompts but does not grant write authority. The mailbox request must forbid mutation and the repository must pass the clean-baseline and post-turn checks in [review-bypass-readonly.md](review-bypass-readonly.md).
 
+For a user-authorized host setup session, enable the setup Bypass profile with one guarded action:
+
+```powershell
+pwsh -NoProfile -File $uia `
+  -Action EnableBypass `
+  -BypassContract 'host-setup-delegated'
+```
+
+This suppresses routine setup prompts but grants only the exact setup commands, declared non-secret config writes, declared network hosts, and restart authority recorded in [host-setup-delegated.md](host-setup-delegated.md). It does not authorize project edits, Git mutation, deployment, destructive commands, or credential disclosure.
+
 For an explicitly authorized direct-main-exclusive session, use the same guarded action with the write-capable contract:
 
 ```powershell
@@ -81,7 +91,7 @@ pwsh -NoProfile -File $uia `
   -BypassContract 'direct-main-exclusive'
 ```
 
-The action accepts only `review-readonly` or `direct-main-exclusive`. It accepts an already-enabled Bypass state; otherwise it resets a stale expanded selector with `Collapse` then `Expand` and searches UIA top-level popups belonging to Claude processes. On first acknowledgement it requires the exact Bypass radio option, the `Bypass all permissions?` dialog, Claude's warning that it may execute destructive commands, one visible Cancel button, and one visible Bypass confirmation button. If Claude has already recorded the warning acknowledgement and switches modes without another modal, the helper instead requires the main permission button to become exactly `Bypass permissions`. Do not use generic `Select` plus `Invoke` for this flow.
+The action accepts only `review-readonly`, `host-setup-delegated`, or `direct-main-exclusive`. It accepts an already-enabled Bypass state; otherwise it resets a stale expanded selector with `Collapse` then `Expand` and searches UIA top-level popups belonging to Claude processes. On first acknowledgement it requires the exact Bypass radio option, the `Bypass all permissions?` dialog, Claude's warning that it may execute destructive commands, one visible Cancel button, and one visible Bypass confirmation button. If Claude has already recorded the warning acknowledgement and switches modes without another modal, the helper instead requires the main permission button to become exactly `Bypass permissions`. Do not use generic `Select` plus `Invoke` for this flow.
 
 Some Claude Desktop builds expose `ExpandCollapse` but leave the selector closed. After the primary UIA attempt times out, the helper may focus the uniquely named permission button and send one Space key only when the focused element name, control type, Claude process ID, native window handle, and current foreground window all match. It never activates another window or uses coordinates; any guard mismatch fails closed.
 
@@ -146,7 +156,7 @@ The helper fails when:
 - multiple controls match;
 - prompt text does not match the caller's contract-specific expression;
 - the expected paired deny or cancel control is absent;
-- Bypass is requested without the exact review-readonly or direct-main-exclusive acknowledgement;
+- Bypass is requested without the exact review-readonly, host-setup-delegated, or direct-main-exclusive acknowledgement;
 - Claude's Bypass warning or confirmation dialog differs from the tested UI;
 - the permission selector needs the keyboard fallback while Claude is not already foreground;
 - the requested UIA pattern is unsupported;

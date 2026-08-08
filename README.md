@@ -10,6 +10,7 @@ The current design uses:
 - sibling Git worktrees when Claude is explicitly asked to implement changes;
 - exclusive main-worktree handoff when the user explicitly requests equal non-isolated project access;
 - guarded Bypass for prompt-free, contractually read-only review on a clean Git baseline;
+- guarded Bypass for exact, user-authorized host setup without project writes or credential disclosure;
 - Codex-managed approval for prompts that exactly match the delegated task contract.
 
 The previous PowerShell CLI runner and polling toolkit has been retired.
@@ -73,6 +74,7 @@ Primary UIA actions do not move the mouse or bring Claude to the foreground. A C
 | Mode | Claude access | Writer ownership | Permission mode |
 | --- | --- | --- | --- |
 | `review` | Read-only main worktree | Codex | Guarded `Bypass permissions` by default; `Manual` fallback |
+| `host-setup-delegated` | Exact host setup commands and non-secret config only | Codex owns project files; Claude owns declared setup steps | Guarded `Bypass permissions` |
 | `isolated-implementer` | Dedicated sibling worktree | Claude owns the isolated tree | `Accept edits` or guarded prompts |
 | `direct-main-exclusive` | Current main worktree | Claude temporarily owns main; Codex freezes | Explicit guarded `Bypass permissions` |
 
@@ -92,6 +94,12 @@ For review and discussion, chat-mode defaults Claude Desktop to guarded Bypass u
 
 Review Bypass requires a clean Git worktree, named branch, and baseline commit. Chat-mode restores `Manual` when the session closes and rejects the turn if project status, branch, HEAD, commits, or upstream state changes. Dirty, unversioned, detached, or unusually sensitive workspaces fall back to `Manual`.
 
+## Host setup delegation
+
+When the user explicitly asks Claude to install a plugin or configure a local tool, chat-mode may use `host-setup-delegated`. This keeps project files read-only while allowing exact declared setup commands, declared non-secret config writes, and declared network hosts. It is useful for tasks such as installing a Claude Code plugin after Codex has recorded the setup scope and smoke tests.
+
+Secrets stay outside chat-mode. Claude must not ask for, print, store, or write Access Anywhere URLs, API keys, passwords, tokens, private keys, or one-time codes. If secret entry is required, the user handles it directly in the local UI or command prompt, and Claude resumes only for non-secret verification. Codex restores `Manual`, verifies the repository stayed clean, and checks that Claude did not exceed the setup contract.
+
 ## Direct main handoff
 
 When the user explicitly requests non-isolated equal project access, Codex requires a clean main worktree and records the branch, baseline commit, upstream state, scope, authorized commands, and any Git, network, credential, deployment, or external-path authority. Codex then freezes its own writes and hands the main worktree exclusively to Claude.
@@ -104,6 +112,7 @@ Equal access means equivalent authority under the user's task, not concurrent ed
 
 - Codex owns the loop; Claude never starts another agent loop.
 - Claude is read-only by default; Codex is the sole main-worktree writer.
+- Host setup Bypass permits only exact non-secret setup authority and never project edits or credentials.
 - Isolated implementation uses one writer per worktree and an explicit `write_scope`.
 - Direct main implementation transfers exclusive writer ownership serially; Codex and Claude never write the same worktree concurrently.
 - `Accept edits` is session convenience, not path-level sandboxing; out-of-scope changes are rejected during inspection.
