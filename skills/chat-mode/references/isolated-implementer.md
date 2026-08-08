@@ -17,6 +17,7 @@ Use this mode only when the user explicitly asks Claude to create or modify many
 - Do not let Codex edit tracked files in that worktree while Claude owns the turn.
 - Do not let Claude access or modify the main worktree, manage worktrees, switch branches, commit, push, or invoke another agent.
 - Keep trust and permission dialogs as human decisions.
+- Treat edit consent as specific to one exact worktree, branch, base commit, `write_scope`, and authorized command set.
 - Do not integrate changes merely because Claude produced a completion marker.
 
 ## Prepare
@@ -48,6 +49,31 @@ chat-mode/claude-<session-id>
 ```
 
 It also records `.chat-mode/session.json` inside the isolated worktree.
+
+## Session-level edit consent
+
+After preparation, show the user exactly:
+
+- the isolated worktree path;
+- branch and base commit;
+- declared `write_scope`;
+- requested validation commands;
+- that `Accept edits` is UI permission rather than an OS path sandbox.
+
+Ask once for approval of that tuple. After explicit approval, use background UIA to set the isolated Claude session to `Accept edits`. Do not require `Allow once` for every file edit.
+
+Consent expires when the session ends or when the worktree, branch, base commit, scope, or requested command set changes. Any such change requires a new user approval.
+
+Keep `Manual` instead when the user requests per-edit approval, secrets or production credentials are present, or the isolated worktree is not an adequate risk boundary.
+
+Even after session consent, never auto-approve:
+
+- workspace trust dialogs;
+- shell or Git commands;
+- access outside the isolated workspace;
+- credential, network, deployment, or other unexpected permission prompts.
+
+`write_scope` is enforced after changes are made. A violation makes the result ineligible for integration; it does not prove the out-of-scope write never occurred.
 
 ## Request contract
 
@@ -82,7 +108,7 @@ Tell Claude:
 
 Open Claude Desktop Code with `folder=<worktree_path>`. A new worktree may produce a new trust dialog; ask the user to verify the exact path.
 
-Default to `Manual`. Change to `Accept edits` only after the user explicitly approves the isolated worktree and the declared `write_scope`. Unexpected shell or permission dialogs still require the user.
+Use `Accept edits` only after the session-level consent above. Unexpected shell or permission dialogs still require the user.
 
 ## Handoff and inspection
 
@@ -106,6 +132,8 @@ Require:
 - relevant tests pass in the isolated worktree.
 
 Codex then reviews the full diff. A completion marker means only that Claude stopped; it is not approval to integrate.
+
+Switch the Claude session back to `Manual` after the handoff is captured, including when inspection fails.
 
 ## Integration
 

@@ -15,7 +15,7 @@ Run Codex as the orchestrator and Claude Desktop Code as either a bounded review
 4. For review or discussion, set Claude to `Manual` and explicitly forbid edits, commits, pushes, and destructive commands.
 5. Bound every session by turns, time, and response size. Default to 3 turns and a 5-minute limit per Claude turn.
 6. Use one writer per working tree. In review mode, Codex is the sole project writer. In isolated-implementer mode, Claude writes only in its dedicated worktree while the main worktree remains untouched.
-7. Require a Git repository, clean main worktree, baseline commit, dedicated branch, and explicit `write_scope` before isolated implementation.
+7. Require a Git repository, clean main worktree, baseline commit, dedicated branch, explicit `write_scope`, authorized command set, and one session-specific user approval before isolated implementation.
 
 Read [references/protocol.md](references/protocol.md) before starting a real session. On Windows, read [references/windows-uia.md](references/windows-uia.md) before controlling Claude Desktop.
 
@@ -81,11 +81,15 @@ Use `scripts/claude-desktop-uia.ps1` or equivalent native UIA calls.
 - Select the strongest available Opus model for the first architecture or adversarial review.
 - Use Sonnet for repeated routine turns when speed or usage matters.
 - Set `Manual` for discussion and review.
-- Default to `Manual` for implementation. Set `Accept edits` only after the user explicitly approves the isolated worktree and declared `write_scope`.
+- Before implementation, show the user the exact worktree path, branch, base commit, `write_scope`, and authorized commands once.
+- After the user explicitly approves that session tuple, set `Accept edits` for the isolated Claude session so individual file edits do not require repeated approval.
+- Keep `Manual` when the user requests per-edit confirmation or the repository is unusually sensitive.
 - Identify controls by accessible name and control type.
 - Fail on zero or multiple matches instead of guessing.
 
 Do not use hard-coded screen coordinates unless the user explicitly accepts a fragile, visible fallback.
+
+`Accept edits` is not an OS-level path sandbox. It permits file edits in the trusted Claude workspace; isolation and post-turn `write_scope` inspection bound the risk. Never auto-approve shell, Git, workspace trust, or other unexpected permission dialogs.
 
 ### 6. Send and monitor
 
@@ -112,7 +116,7 @@ Continue only while the bounded contract permits another turn.
 
 ### 8. Close cleanly
 
-Record the final result and stop reason. Return control to the user. Report the completion marker, changed worktree, branch, diff status, tests, integration status, and any remaining cleanup. Never delete an isolated worktree or branch automatically.
+Record the final result and stop reason. Return control to the user. Report the completion marker, changed worktree, branch, diff status, tests, integration status, and any remaining cleanup. Switch the Claude session back to `Manual` after isolated implementation ends. Never delete an isolated worktree or branch automatically.
 
 ## Fallback order
 

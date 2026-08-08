@@ -43,7 +43,16 @@ Select Opus after inspecting the available options:
 pwsh -NoProfile -File $uia -Action Select -NameRegex '^Opus 5(?:\s+\d+)?$' -ControlType RadioButton
 ```
 
-Open the permission selector and choose Manual:
+For an explicitly approved isolated-implementer session, change `Manual` to `Accept edits`:
+
+```powershell
+pwsh -NoProfile -File $uia -Action Expand -NameRegex '^Manual$' -ControlType Button
+pwsh -NoProfile -File $uia -Action Select -NameRegex '^Accept edits\b' -ControlType RadioButton
+```
+
+Do this only after showing the exact worktree, branch, base commit, `write_scope`, and authorized commands to the user and receiving one session-specific approval. This avoids repeated `Allow once` prompts for file edits. It does not approve shell, Git, trust, network, or other permission dialogs.
+
+Restore `Manual` when the isolated session ends:
 
 ```powershell
 pwsh -NoProfile -File $uia -Action Expand -NameRegex '^Accept edits$' -ControlType Button

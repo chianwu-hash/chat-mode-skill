@@ -53,7 +53,7 @@ Codex should:
 1. write a bounded request under `.chat-mode/exchange/`;
 2. open the repository in Claude Desktop Code;
 3. stop for any workspace trust or permission decision;
-4. select the requested model and `Manual` mode through background UIA;
+4. select the requested model and the permission mode allowed by the session contract through background UIA;
 5. send a short request-file pointer;
 6. read Claude's accessible response text until the unique completion marker appears;
 7. evaluate the response and return the result to the user.
@@ -64,6 +64,8 @@ Successful UIA actions do not move the mouse, synthesize keystrokes, or bring Cl
 
 When the user explicitly asks Claude to modify files, Codex creates a clean sibling worktree and dedicated `chat-mode/claude-*` branch. Claude may write only inside that worktree and the declared path scope. The main worktree stays unchanged while Claude works.
 
+Codex shows the exact worktree, branch, base commit, scope, and authorized commands once. After the user approves that session tuple, Codex enables `Accept edits` so Claude does not request `Allow once` for every file. Shell, Git, trust, credential, network, deployment, and unexpected permission dialogs remain human decisions. The Claude session returns to `Manual` when the run ends.
+
 After Claude stops, Codex inspects the complete diff, checks scope, reproduces tests, and decides whether to apply or cherry-pick the result. Claude never commits, pushes, manages branches, or writes directly into the main worktree. Worktree cleanup remains a separate user-authorized action.
 
 ## Safety model
@@ -71,6 +73,7 @@ After Claude stops, Codex inspects the complete diff, checks scope, reproduces t
 - Codex owns the loop; Claude never starts another agent loop.
 - Claude is read-only by default; Codex is the sole main-worktree writer.
 - Isolated implementation uses one writer per worktree and an explicit `write_scope`.
+- `Accept edits` is session convenience, not path-level sandboxing; out-of-scope changes are rejected during inspection.
 - Trust and permission dialogs are never auto-approved.
 - Sessions have turn, time, and response-size bounds.
 - `.chat-mode/STOP` aborts the session.
@@ -81,8 +84,8 @@ The canonical protocol is [skills/chat-mode/references/protocol.md](skills/chat-
 
 ## Evidence
 
-The first end-to-end background UIA run is recorded in [docs/smoke-test-2026-08-08.md](docs/smoke-test-2026-08-08.md).
+The first end-to-end background UIA review is recorded in [docs/smoke-test-2026-08-08.md](docs/smoke-test-2026-08-08.md). The first real isolated Claude write is recorded in [docs/smoke-test-isolated-write-2026-08-08.md](docs/smoke-test-isolated-write-2026-08-08.md).
 
 ## Status
 
-Experimental. The 2026-08-08 smoke test validated one read-only Codex-to-Claude turn with Claude Opus 5, High effort, Manual mode, background send, and complete response extraction. The worktree helper is validated independently with a temporary isolated branch; an end-to-end Claude write session remains the next live test.
+Experimental. The 2026-08-08 tests validated background read-only review and a real Claude file write in an isolated worktree. The write test passed exact-content, branch/base, scope, diff-check, and unchanged-main-tree verification.

@@ -12,6 +12,9 @@
 - Do not recreate or call the retired root `tools/` runner.
 - Keep Claude read-only unless the user explicitly authorizes isolated-implementer mode.
 - For isolated implementation, require a clean main worktree and use the bundled worktree helper.
+- Show the exact worktree, branch, base commit, `write_scope`, and authorized commands; after one explicit session approval, set Claude to `Accept edits`.
+- Keep shell, Git, trust, network, credential, deployment, and unexpected permission dialogs under human control.
+- Restore Claude to `Manual` after the isolated session ends.
 - Never let Codex and Claude edit tracked files in the same worktree concurrently.
 - Enforce the declared `write_scope` before integrating Claude's changes.
 - Never auto-approve workspace trust or permission dialogs.
