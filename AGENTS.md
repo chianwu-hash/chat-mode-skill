@@ -6,6 +6,16 @@
 - Keep PowerShell scripts ASCII-only when practical and use explicit UTF-8 for text files.
 - Treat `skills/chat-mode/SKILL.md` as the source of truth.
 
+## Required startup steps
+
+Before changing this repository:
+
+1. Read `docs/PROJECT_MEMORY.md`.
+2. Read `docs/RUNBOOK.md`.
+3. Read `docs/OPERATIONS_LOG.md` when recent implementation or smoke-test history may matter.
+4. Read `skills/chat-mode/SKILL.md` and the relevant file under `skills/chat-mode/references/` for the mode being changed.
+5. Treat `skills/chat-mode/SKILL.md` and its referenced files as protocol source of truth over summaries.
+
 ## Chat mode
 
 - Use the filesystem mailbox plus Windows UI Automation workflow documented by the skill.

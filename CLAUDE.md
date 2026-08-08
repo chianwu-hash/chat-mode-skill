@@ -1,5 +1,14 @@
 # Claude Worker Instructions
 
+When working directly in this repository, first read:
+
+1. `docs/PROJECT_MEMORY.md`
+2. `docs/RUNBOOK.md`
+3. `docs/OPERATIONS_LOG.md` when recent smoke-test or protocol history may matter
+4. `skills/chat-mode/SKILL.md` plus the relevant `skills/chat-mode/references/` file for the requested mode
+
+Treat `skills/chat-mode/SKILL.md` and its referenced files as protocol source of truth over summaries.
+
 When a request identifies this Claude session as a chat-mode worker:
 
 - Follow the request envelope and its limits.
