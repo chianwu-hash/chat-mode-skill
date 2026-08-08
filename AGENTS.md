@@ -10,13 +10,18 @@
 
 - Use the filesystem mailbox plus Windows UI Automation workflow documented by the skill.
 - Do not recreate or call the retired root `tools/` runner.
-- Keep Claude read-only unless the user explicitly authorizes a broader mode.
+- Keep Claude read-only unless the user explicitly authorizes isolated-implementer mode.
+- For isolated implementation, require a clean main worktree and use the bundled worktree helper.
+- Never let Codex and Claude edit tracked files in the same worktree concurrently.
+- Enforce the declared `write_scope` before integrating Claude's changes.
 - Never auto-approve workspace trust or permission dialogs.
 - Do not use screen coordinates when UIA exposes a named control.
 - Stop on ambiguous controls, unexpected mutation, timeout, malformed completion markers, or `.chat-mode/STOP`.
+- Do not remove worktrees or branches without separate user authorization after verified integration.
 
 ## Repository changes
 
-- Update the skill, its bundled references, and its UIA helper together when the protocol changes.
+- Update the skill, bundled references, and relevant helpers together when the protocol changes.
 - Validate `skills/chat-mode` with the skill-creator validator before committing.
 - Test UIA changes with read-only actions against Claude Desktop when available.
+- Run `pwsh -NoProfile -File .\tests\worktree-smoke.ps1` after changing isolated-worktree behavior.
