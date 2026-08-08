@@ -16,8 +16,9 @@
 - Treat the user's task as delegated authority for necessary project-local reads, in-scope writes, and declared validation commands.
 - Record the exact worktree, branch, base commit, `write_scope`, and authorized actions and commands; set Claude to `Accept edits` without a second confirmation when they remain inside the original request.
 - Let Codex verify and approve exact contract-matching prompts through guarded UIA actions. Escalate scope expansion, destructive actions, credentials, production or deployment access, and unexpected network access.
-- Enable `Bypass permissions` only for explicit `direct-main-exclusive` authority and only through the guarded warning-confirmation action.
-- Restore Claude to `Manual` after every implementation session ends.
+- Default clean review sessions to `Bypass permissions` under the guarded `review-readonly` contract; keep the mailbox authority read-only and reject any repository mutation.
+- Enable writable `Bypass permissions` only for explicit `direct-main-exclusive` authority and only through the guarded warning-confirmation action.
+- Restore Claude to `Manual` after every chat-mode session ends.
 - Never let Codex and Claude edit tracked files in the same worktree concurrently.
 - Enforce the declared `write_scope` before integrating Claude's changes.
 - Approve workspace trust only when the accessible path exactly matches the recorded contract.

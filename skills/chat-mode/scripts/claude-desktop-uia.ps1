@@ -33,6 +33,17 @@ if (-not $IsWindows) {
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class ChatModeWindowGuard
+{
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+}
+'@
 
 function Get-ClaudeRoot {
     $windows = @(
@@ -75,7 +86,8 @@ function Get-MatchingElements {
     param(
         [System.Windows.Automation.AutomationElement]$Root,
         [string]$Pattern,
-        [string]$ExpectedType
+        [string]$ExpectedType,
+        [int[]]$ProcessId = @()
     )
 
     $regex = [regex]::new($Pattern)
@@ -91,7 +103,8 @@ function Get-MatchingElements {
         if (
             -not [string]::IsNullOrWhiteSpace($name) -and
             $regex.IsMatch($name) -and
-            (Test-ControlType -Element $element -Expected $ExpectedType)
+            (Test-ControlType -Element $element -Expected $ExpectedType) -and
+            ($ProcessId.Count -eq 0 -or $element.Current.ProcessId -in $ProcessId)
         ) {
             $result.Add($element)
         }
@@ -104,10 +117,15 @@ function Get-UniqueElement {
     param(
         [System.Windows.Automation.AutomationElement]$Root,
         [string]$Pattern,
-        [string]$ExpectedType
+        [string]$ExpectedType,
+        [int[]]$ProcessId = @()
     )
 
-    $elements = @(Get-MatchingElements -Root $Root -Pattern $Pattern -ExpectedType $ExpectedType)
+    $elements = @(Get-MatchingElements `
+            -Root $Root `
+            -Pattern $Pattern `
+            -ExpectedType $ExpectedType `
+            -ProcessId $ProcessId)
     if ($elements.Count -eq 0) {
         throw "No UI Automation control matched /$Pattern/ with type $ExpectedType."
     }
@@ -186,6 +204,100 @@ function Select-Element {
     }
 
     $selectionPattern.Select()
+}
+
+function Open-ExpandedElement {
+    param([System.Windows.Automation.AutomationElement]$Element)
+
+    $expandPattern = $null
+    if (-not $Element.TryGetCurrentPattern(
+            [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
+            [ref]$expandPattern
+        )) {
+        throw "Control '$($Element.Current.Name)' does not support ExpandCollapse."
+    }
+
+    if (
+        $expandPattern.Current.ExpandCollapseState -ne
+        [System.Windows.Automation.ExpandCollapseState]::Collapsed
+    ) {
+        $expandPattern.Collapse()
+        Start-Sleep -Milliseconds 100
+        $expandPattern = $null
+        if (-not $Element.TryGetCurrentPattern(
+                [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
+                [ref]$expandPattern
+            )) {
+            throw "Control '$($Element.Current.Name)' lost ExpandCollapse after reset."
+        }
+    }
+
+    $expandPattern.Expand()
+}
+
+function Reset-CollapsedElement {
+    param([System.Windows.Automation.AutomationElement]$Element)
+
+    $expandPattern = $null
+    if (-not $Element.TryGetCurrentPattern(
+            [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
+            [ref]$expandPattern
+        )) {
+        throw "Control '$($Element.Current.Name)' does not support ExpandCollapse."
+    }
+    if (
+        $expandPattern.Current.ExpandCollapseState -ne
+        [System.Windows.Automation.ExpandCollapseState]::Collapsed
+    ) {
+        $expandPattern.Collapse()
+        Start-Sleep -Milliseconds 100
+    }
+}
+
+function Invoke-GuardedFocusedSpace {
+    param(
+        [System.Windows.Automation.AutomationElement]$Element,
+        [System.Windows.Automation.AutomationElement]$WindowRoot
+    )
+
+    $windowHandle = [IntPtr]$WindowRoot.Current.NativeWindowHandle
+    if ($windowHandle -eq [IntPtr]::Zero) {
+        throw 'Claude main window has no native handle for the guarded keyboard fallback.'
+    }
+    if ([ChatModeWindowGuard]::GetForegroundWindow() -ne $windowHandle) {
+        throw 'Claude is not foreground; refusing the guarded keyboard fallback.'
+    }
+
+    $Element.SetFocus()
+    Start-Sleep -Milliseconds 100
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if (
+        $focused.Current.ProcessId -ne $Element.Current.ProcessId -or
+        $focused.Current.Name -ne $Element.Current.Name -or
+        $focused.Current.ControlType -ne [System.Windows.Automation.ControlType]::Button
+    ) {
+        throw "Focus guard failed for '$($Element.Current.Name)'."
+    }
+    if ([ChatModeWindowGuard]::GetForegroundWindow() -ne $windowHandle) {
+        throw 'Foreground changed before the guarded keyboard fallback.'
+    }
+
+    [System.Windows.Forms.SendKeys]::SendWait(' ')
+}
+
+function Get-AncestorWindow {
+    param([System.Windows.Automation.AutomationElement]$Element)
+
+    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $current = $Element
+    while ($null -ne $current) {
+        if ($current.Current.ControlType -eq [System.Windows.Automation.ControlType]::Window) {
+            return $current
+        }
+        $current = $walker.GetParent($current)
+    }
+
+    throw "No ancestor window was found for '$($Element.Current.Name)'."
 }
 
 function Assert-SpecificTextRegex {
@@ -330,39 +442,56 @@ switch ($Action) {
     }
 
     'EnableBypass' {
-        if ($BypassContract -ne 'direct-main-exclusive') {
-            throw "EnableBypass requires -BypassContract 'direct-main-exclusive'."
+        $allowedBypassContracts = @(
+            'review-readonly'
+            'direct-main-exclusive'
+        )
+        if ($BypassContract -notin $allowedBypassContracts) {
+            throw 'EnableBypass requires -BypassContract review-readonly or direct-main-exclusive.'
         }
 
         $currentMode = Get-UniqueElement `
             -Root $root `
-            -Pattern '^(?:Manual|Accept edits)$' `
+            -Pattern '^(?:Manual|Accept edits|Bypass permissions)$' `
             -ExpectedType 'Button'
-        $expandPattern = $null
-        if (-not $currentMode.TryGetCurrentPattern(
-                [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
-                [ref]$expandPattern
-            )) {
-            throw "Control '$($currentMode.Current.Name)' does not support ExpandCollapse."
+        if ($currentMode.Current.Name -eq 'Bypass permissions') {
+            Write-Output "already enabled: Bypass permissions ($BypassContract)"
+            break
         }
-        if (
-            $expandPattern.Current.ExpandCollapseState -eq
-            [System.Windows.Automation.ExpandCollapseState]::Collapsed
-        ) {
-            $expandPattern.Expand()
-        }
+        $claudeProcessId = @(Get-Process -Name $ProcessName -ErrorAction Stop |
+                ForEach-Object { $_.Id })
+        $desktopRoot = [System.Windows.Automation.AutomationElement]::RootElement
+        Open-ExpandedElement -Element $currentMode
 
         $deadline = [DateTimeOffset]::UtcNow.AddSeconds(5)
         do {
             $bypassOptions = @(Get-MatchingElements `
-                    -Root $root `
+                    -Root $desktopRoot `
                     -Pattern '^Bypass permissions\b' `
-                    -ExpectedType 'RadioButton')
+                    -ExpectedType 'RadioButton' `
+                    -ProcessId $claudeProcessId)
             if ($bypassOptions.Count -gt 0) {
                 break
             }
             Start-Sleep -Milliseconds 250
         } while ([DateTimeOffset]::UtcNow -lt $deadline)
+
+        if ($bypassOptions.Count -eq 0) {
+            Reset-CollapsedElement -Element $currentMode
+            Invoke-GuardedFocusedSpace -Element $currentMode -WindowRoot $root
+            $deadline = [DateTimeOffset]::UtcNow.AddSeconds(5)
+            do {
+                $bypassOptions = @(Get-MatchingElements `
+                        -Root $desktopRoot `
+                        -Pattern '^Bypass permissions\b' `
+                        -ExpectedType 'RadioButton' `
+                        -ProcessId $claudeProcessId)
+                if ($bypassOptions.Count -gt 0) {
+                    break
+                }
+                Start-Sleep -Milliseconds 250
+            } while ([DateTimeOffset]::UtcNow -lt $deadline)
+        }
 
         if ($bypassOptions.Count -ne 1) {
             throw "Expected one Bypass permission option, found $($bypassOptions.Count)."
@@ -372,82 +501,109 @@ switch ($Action) {
 
         $deadline = [DateTimeOffset]::UtcNow.AddSeconds(5)
         do {
-            $confirmButtons = @(Get-MatchingElements `
+            $titles = @(Get-MatchingElements `
+                    -Root $desktopRoot `
+                    -Pattern '^Bypass all permissions\?$' `
+                    -ExpectedType 'Any' `
+                    -ProcessId $claudeProcessId)
+            $modeButtons = @(Get-MatchingElements `
                     -Root $root `
                     -Pattern '^Bypass permissions$' `
                     -ExpectedType 'Button')
-            if ($confirmButtons.Count -gt 0) {
+            if ($titles.Count -gt 0 -or $modeButtons.Count -gt 0) {
                 break
             }
             Start-Sleep -Milliseconds 250
         } while ([DateTimeOffset]::UtcNow -lt $deadline)
 
-        if ($confirmButtons.Count -ne 1) {
-            throw "Expected one Bypass confirmation button, found $($confirmButtons.Count)."
+        if ($titles.Count -eq 0 -and $modeButtons.Count -eq 1) {
+            Write-Output "enabled: Bypass permissions ($BypassContract; warning previously acknowledged)"
+            break
         }
-
-        $titles = @(Get-MatchingElements `
-                -Root $root `
-                -Pattern '^Bypass all permissions\?$' `
-                -ExpectedType 'Any')
         if ($titles.Count -eq 0) {
-            throw 'Bypass confirmation title is missing.'
+            throw 'Bypass confirmation title and final mode are both missing.'
         }
+        $dialogRoots = @($titles | ForEach-Object {
+                Get-AncestorWindow -Element $_
+            })
+        $dialogRuntimeIds = @($dialogRoots | ForEach-Object {
+                $_.GetRuntimeId() -join '.'
+            } | Sort-Object -Unique)
+        if ($dialogRuntimeIds.Count -ne 1) {
+            throw "Bypass title controls span $($dialogRuntimeIds.Count) dialog windows."
+        }
+        $dialogRoot = $dialogRoots[0]
+        $confirmButton = Get-UniqueElement `
+            -Root $dialogRoot `
+            -Pattern '^Bypass permissions$' `
+            -ExpectedType 'Button'
         $warning = Get-UniqueElement `
-            -Root $root `
+            -Root $dialogRoot `
             -Pattern '^Claude will read, edit, and execute files without asking' `
             -ExpectedType 'Text'
         if (-not $warning.Current.IsEnabled -or $warning.Current.IsOffscreen) {
             throw 'Bypass warning text is not available.'
         }
         $cancel = Get-UniqueElement `
-            -Root $root `
+            -Root $dialogRoot `
             -Pattern '^Cancel$' `
             -ExpectedType 'Button'
         if (-not $cancel.Current.IsEnabled -or $cancel.Current.IsOffscreen) {
             throw 'Bypass Cancel control is not available.'
         }
 
-        Invoke-Element -Element $confirmButtons[0]
+        Invoke-Element -Element $confirmButton
         Start-Sleep -Milliseconds 500
         $null = Get-UniqueElement `
             -Root $root `
             -Pattern '^Bypass permissions$' `
             -ExpectedType 'Button'
-        Write-Output 'enabled: Bypass permissions'
+        Write-Output "enabled: Bypass permissions ($BypassContract)"
         break
     }
 
     'DisableBypass' {
         $currentMode = Get-UniqueElement `
             -Root $root `
-            -Pattern '^Bypass permissions$' `
+            -Pattern '^(?:Manual|Accept edits|Bypass permissions)$' `
             -ExpectedType 'Button'
-        $expandPattern = $null
-        if (-not $currentMode.TryGetCurrentPattern(
-                [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
-                [ref]$expandPattern
-            )) {
-            throw "Control '$($currentMode.Current.Name)' does not support ExpandCollapse."
+        if ($currentMode.Current.Name -eq 'Manual') {
+            Write-Output 'already selected: Manual'
+            break
         }
-        if (
-            $expandPattern.Current.ExpandCollapseState -eq
-            [System.Windows.Automation.ExpandCollapseState]::Collapsed
-        ) {
-            $expandPattern.Expand()
-        }
+        $claudeProcessId = @(Get-Process -Name $ProcessName -ErrorAction Stop |
+                ForEach-Object { $_.Id })
+        $desktopRoot = [System.Windows.Automation.AutomationElement]::RootElement
+        Open-ExpandedElement -Element $currentMode
 
         $deadline = [DateTimeOffset]::UtcNow.AddSeconds(5)
         do {
             $manualOptions = @(Get-MatchingElements `
-                    -Root $root `
+                    -Root $desktopRoot `
                     -Pattern '^Manual\b' `
-                    -ExpectedType 'RadioButton')
+                    -ExpectedType 'RadioButton' `
+                    -ProcessId $claudeProcessId)
             if ($manualOptions.Count -gt 0) {
                 break
             }
             Start-Sleep -Milliseconds 250
         } while ([DateTimeOffset]::UtcNow -lt $deadline)
+        if ($manualOptions.Count -eq 0) {
+            Reset-CollapsedElement -Element $currentMode
+            Invoke-GuardedFocusedSpace -Element $currentMode -WindowRoot $root
+            $deadline = [DateTimeOffset]::UtcNow.AddSeconds(5)
+            do {
+                $manualOptions = @(Get-MatchingElements `
+                        -Root $desktopRoot `
+                        -Pattern '^Manual\b' `
+                        -ExpectedType 'RadioButton' `
+                        -ProcessId $claudeProcessId)
+                if ($manualOptions.Count -gt 0) {
+                    break
+                }
+                Start-Sleep -Milliseconds 250
+            } while ([DateTimeOffset]::UtcNow -lt $deadline)
+        }
         if ($manualOptions.Count -ne 1) {
             throw "Expected one Manual option, found $($manualOptions.Count)."
         }
@@ -468,7 +624,7 @@ switch ($Action) {
         if ($manualButtons.Count -ne 1) {
             throw "Expected one Manual mode button, found $($manualButtons.Count)."
         }
-        Write-Output 'disabled Bypass permissions; selected: Manual'
+        Write-Output 'selected: Manual'
         break
     }
 

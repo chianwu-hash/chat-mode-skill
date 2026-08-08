@@ -12,12 +12,14 @@ Run Codex as the orchestrator and Claude Desktop Code as a bounded reviewer, iso
 1. Keep Codex as the only orchestrator. Claude must not invoke Codex or start a nested chat-mode loop.
 2. Use files for durable requests and transcripts. Use UIA as the control plane and as the tested response-reading path.
 3. Treat the user's task as delegated authority for necessary project-local reads, in-scope writes, and declared validation. Let Codex verify and approve matching Claude prompts; ask the user only when authority would expand or risk materially changes.
-4. For review or discussion, set Claude to `Manual` and explicitly forbid edits, commits, pushes, and destructive commands.
+4. For review or discussion, default Claude Desktop to guarded `Bypass permissions` under a `review-readonly` contract. Keep Codex as the sole writer and explicitly forbid edits, commits, pushes, destructive commands, network access, credentials, deployment, and external paths.
 5. Bound every session by turns, time, and response size. Default to 3 turns and a 5-minute limit per Claude turn.
 6. Use one writer per working tree. In review mode, Codex is the sole project writer. In implementation modes, hand the selected working tree exclusively to Claude and freeze Codex writes until handback.
 7. Require a Git repository, clean selected worktree, baseline commit and branch, explicit `write_scope`, and authorized action and command sets before implementation.
 
 Read [references/protocol.md](references/protocol.md) before starting a real session. On Windows, read [references/windows-uia.md](references/windows-uia.md) before controlling Claude Desktop.
+
+When the user asks for review or discussion, read [references/review-bypass-readonly.md](references/review-bypass-readonly.md) before enabling the default read-only Bypass profile.
 
 When the user asks Claude to modify files, read [references/isolated-implementer.md](references/isolated-implementer.md) before creating an isolated worktree. When the user explicitly requests the same main worktree, no isolation, equal project access, or Bypass on main, read [references/direct-main-exclusive.md](references/direct-main-exclusive.md) before granting write access.
 
@@ -35,11 +37,11 @@ Confirm or infer:
 - actions and commands delegated by the user's request;
 - completion marker unique to the turn.
 
-Default to read-only. Do not expand authority merely to keep the loop moving.
+Default to `review` with a read-only mailbox contract and the guarded `review-readonly` Bypass profile. Do not confuse Claude Desktop's permission UI with task authority, and do not expand authority merely to keep the loop moving.
 
 ### 2. Select the working tree
 
-For review mode, use the main repository and keep Claude read-only.
+For review mode, use the main repository and keep Claude contractually read-only. Require a clean Git baseline for the default Bypass profile so any mutation is detectable. Fall back to `Manual` review when the worktree is dirty, unversioned, detached, or unusually sensitive.
 
 For isolated-implementer mode, require explicit user intent, then use `scripts/chat-mode-worktree.ps1 -Action Prepare` with one or more `-WriteScope` patterns. Open the resulting sibling worktree in Claude. Do not let Claude write in the main worktree and do not let Codex edit tracked files in Claude's worktree during its turn.
 
@@ -83,17 +85,17 @@ Use `scripts/claude-desktop-uia.ps1` or equivalent native UIA calls.
 
 - Select the strongest available Opus model for the first architecture or adversarial review.
 - Use Sonnet for repeated routine turns when speed or usage matters.
-- Set `Manual` for discussion and review.
+- For clean review and discussion sessions, use `EnableBypass -BypassContract review-readonly` by default. Record the clean branch, HEAD, upstream state, read-only actions, and declared inspection commands first.
 - Record and report the exact worktree path, branch, base commit, `write_scope`, and authorized actions and commands before implementation.
 - When the user's task already authorizes those in-scope writes, set `Accept edits` for the isolated Claude session without requesting another confirmation.
 - Only when the user explicitly authorizes direct non-isolated access, use `EnableBypass -BypassContract direct-main-exclusive`. Verify Claude's fixed destructive-command warning and confirmation controls through UIA.
-- Keep `Manual` when the user requests per-edit confirmation or the repository is unusually sensitive.
+- Keep `Manual` for dirty, unversioned, detached, or unusually sensitive review workspaces and when the user requests per-action confirmation.
 - Identify controls by accessible name and control type.
 - Fail on zero or multiple matches instead of guessing.
 
 Do not use hard-coded screen coordinates unless the user explicitly accepts a fragile, visible fallback.
 
-Neither `Accept edits` nor `Bypass permissions` is an OS-level path sandbox. Use Bypass only for an explicit direct-main-exclusive contract, never as the inferred default. Textual scope and post-turn inspection detect violations but cannot prevent external access.
+Neither `Accept edits` nor `Bypass permissions` is an OS-level path sandbox. Use Bypass only with the guarded `review-readonly` or `direct-main-exclusive` contract. The review profile is contractually read-only even though the UI mode is capable of mutation. Clean baselines, textual scope, and post-turn inspection detect violations but cannot prevent external access.
 
 ### 6. Send and monitor
 
@@ -114,7 +116,7 @@ Treat any of the following as a hard stop:
 
 Read the complete Claude document through `TextPattern.DocumentRange`, extract the response associated with the current request, and preserve it in the session transcript. Do not rely on screenshots or OCR for long text.
 
-In review mode, Codex evaluates Claude's recommendations; it does not automatically execute them.
+In review mode, restore `Manual` at session close and verify the repository remains clean with unchanged branch, HEAD, commits, and upstream state. Any mutation rejects the turn. Codex evaluates Claude's recommendations; it does not automatically execute them.
 
 In isolated-implementer mode, freeze Claude's turn and run `scripts/chat-mode-worktree.ps1 -Action Inspect`. Require `ScopePassed`, review every changed path and the complete diff, reproduce tests, and verify the main worktree stayed clean. A completion marker is not permission to integrate. Apply or cherry-pick only within the user's original modification authority.
 
@@ -124,13 +126,14 @@ Continue only while the bounded contract permits another turn.
 
 ### 8. Close cleanly
 
-Record the final result and stop reason. Return control to the user. Report the completion marker, changed worktree, branch, diff status, tests, integration status, and any remaining cleanup. Switch Claude back to `Manual` after every implementation session. For direct-main-exclusive mode, inspect before running `chat-mode-direct-main.ps1 -Action Close` to archive the handoff metadata. Never delete an isolated worktree or branch automatically.
+Record the final result and stop reason. Return control to the user. Report the completion marker, changed worktree, branch, diff status, tests, integration status, and any remaining cleanup. Switch Claude back to `Manual` after every chat-mode session. For direct-main-exclusive mode, inspect before running `chat-mode-direct-main.ps1 -Action Close` to archive the handoff metadata. Never delete an isolated worktree or branch automatically.
 
 ## Fallback order
 
 1. Filesystem request plus background UIA control and response reading.
-2. Filesystem request plus a user-approved response file.
-3. Visible Computer Use only for controls UIA cannot expose.
-4. Manual user action when authority expansion or ambiguous UI state requires a decision.
+2. For a permission selector that ignores `ExpandCollapse`, one guarded Space key on the uniquely focused Claude control only when process, focus, native handle, and existing foreground all match.
+3. Filesystem request plus a user-approved response file.
+4. Visible Computer Use only for controls UIA cannot expose.
+5. Manual user action when authority expansion or ambiguous UI state requires a decision.
 
 Never fall back to the removed PowerShell CLI runner, polling state machine, coordinate clicking, or simulated worker output.

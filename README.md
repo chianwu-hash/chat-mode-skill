@@ -9,6 +9,7 @@ The current design uses:
 - accessible document text instead of screenshots or OCR for responses;
 - sibling Git worktrees when Claude is explicitly asked to implement changes;
 - exclusive main-worktree handoff when the user explicitly requests equal non-isolated project access;
+- guarded Bypass for prompt-free, contractually read-only review on a clean Git baseline;
 - Codex-managed approval for prompts that exactly match the delegated task contract.
 
 The previous PowerShell CLI runner and polling toolkit has been retired.
@@ -65,13 +66,13 @@ Codex should:
 6. read Claude's accessible response text until the unique completion marker appears;
 7. evaluate the response and return the result to the user.
 
-Successful UIA actions do not move the mouse, synthesize keystrokes, or bring Claude to the foreground.
+Primary UIA actions do not move the mouse or bring Claude to the foreground. A Claude build whose permission selector ignores `ExpandCollapse` may require one guarded Space key after exact control, process, focus, window-handle, and existing-foreground checks; it never uses coordinates or activates another window.
 
 ## Modes
 
 | Mode | Claude access | Writer ownership | Permission mode |
 | --- | --- | --- | --- |
-| `review` | Read-only main worktree | Codex | `Manual` |
+| `review` | Read-only main worktree | Codex | Guarded `Bypass permissions` by default; `Manual` fallback |
 | `isolated-implementer` | Dedicated sibling worktree | Claude owns the isolated tree | `Accept edits` or guarded prompts |
 | `direct-main-exclusive` | Current main worktree | Claude temporarily owns main; Codex freezes | Explicit guarded `Bypass permissions` |
 
@@ -84,6 +85,12 @@ Codex records and reports the exact worktree, branch, base commit, scope, author
 Authority expansion still returns to the user. Examples include out-of-scope paths, destructive operations, credentials, production or deployment access, and unexpected network activity. Claude remains prohibited from Git operations assigned to Codex. The Claude session returns to `Manual` when the run ends.
 
 After Claude stops, Codex inspects the complete diff, checks scope, reproduces tests, and decides whether to apply or cherry-pick the result. Claude never commits, pushes, manages branches, or writes directly into the main worktree. Worktree cleanup remains a separate user-authorized action.
+
+## Read-only review
+
+For review and discussion, chat-mode defaults Claude Desktop to guarded Bypass under a `review-readonly` contract. This removes routine prompts while Claude reads, lists, searches, and inspects the project. Codex remains the sole writer, and the request forbids edits, Git mutation, network access, credentials, deployment, destructive commands, and external paths.
+
+Review Bypass requires a clean Git worktree, named branch, and baseline commit. Chat-mode restores `Manual` when the session closes and rejects the turn if project status, branch, HEAD, commits, or upstream state changes. Dirty, unversioned, detached, or unusually sensitive workspaces fall back to `Manual`.
 
 ## Direct main handoff
 
@@ -101,8 +108,8 @@ Equal access means equivalent authority under the user's task, not concurrent ed
 - Direct main implementation transfers exclusive writer ownership serially; Codex and Claude never write the same worktree concurrently.
 - `Accept edits` is session convenience, not path-level sandboxing; out-of-scope changes are rejected during inspection.
 - Guarded UIA approval requires one uniquely matching prompt control plus visible, enabled `Allow once` and `Deny` controls; ambiguity fails closed.
-- `Bypass permissions` is not the normal local-workstation mode.
-- Explicit direct-main handoff is the only normal path that enables Bypass, and it remains bounded by the task contract.
+- `Bypass permissions` is the default Claude Desktop UI mode for clean read-only review, but it does not expand the read-only task contract.
+- Writable Bypass still requires an explicit direct-main handoff and remains bounded by the task contract.
 - Sessions have turn, time, and response-size bounds.
 - `.chat-mode/STOP` aborts the session.
 - Screenshots and OCR are not the source of truth for long responses.
@@ -112,8 +119,8 @@ The canonical protocol is [skills/chat-mode/references/protocol.md](skills/chat-
 
 ## Evidence
 
-The first end-to-end background UIA review is recorded in [docs/smoke-test-2026-08-08.md](docs/smoke-test-2026-08-08.md). The first real isolated Claude write is recorded in [docs/smoke-test-isolated-write-2026-08-08.md](docs/smoke-test-isolated-write-2026-08-08.md). The delegated-authority prompt approval test is recorded in [docs/smoke-test-delegated-authority-2026-08-08.md](docs/smoke-test-delegated-authority-2026-08-08.md). The first non-isolated main-worktree Bypass handoff is recorded in [docs/smoke-test-direct-main-bypass-2026-08-08.md](docs/smoke-test-direct-main-bypass-2026-08-08.md).
+The first end-to-end background UIA review is recorded in [docs/smoke-test-2026-08-08.md](docs/smoke-test-2026-08-08.md). The first real isolated Claude write is recorded in [docs/smoke-test-isolated-write-2026-08-08.md](docs/smoke-test-isolated-write-2026-08-08.md). The delegated-authority prompt approval test is recorded in [docs/smoke-test-delegated-authority-2026-08-08.md](docs/smoke-test-delegated-authority-2026-08-08.md). The first non-isolated main-worktree Bypass handoff is recorded in [docs/smoke-test-direct-main-bypass-2026-08-08.md](docs/smoke-test-direct-main-bypass-2026-08-08.md). The default read-only Bypass review and current Claude permission-selector fallback are recorded in [docs/smoke-test-review-bypass-readonly-2026-08-08.md](docs/smoke-test-review-bypass-readonly-2026-08-08.md).
 
 ## Status
 
-Experimental. The 2026-08-08 tests validated background read-only review, isolated Claude writes, guarded workspace trust, Codex-controlled `Allow once`, and an explicit non-isolated `Bypass permissions` handoff. The direct-main test completed without user permission prompts, restored `Manual`, and passed exact-content, write-scope, branch, HEAD, upstream, and diff-check inspection.
+Experimental. The 2026-08-08 tests validated prompt-free read-only review, isolated Claude writes, guarded workspace trust, Codex-controlled `Allow once`, and an explicit non-isolated `Bypass permissions` handoff. The read-only Bypass test completed without permission prompts or commands, restored `Manual`, and left status, branch, HEAD, and commits unchanged. The direct-main test passed exact-content, write-scope, branch, HEAD, upstream, and diff-check inspection.
