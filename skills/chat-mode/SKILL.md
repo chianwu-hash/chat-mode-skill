@@ -1,237 +1,105 @@
-# Skill: chat-mode
-
-Use this skill when the user asks two coding agents, such as Codex and Claude Code, to collaborate for a bounded number of turns or a bounded time window. Prefer the CLI runner when it exists; use the manual file-backed prompt/polling protocol only as a fallback.
-
+---
+name: chat-mode
+description: Coordinate bounded Codex and Claude Desktop collaboration on Windows through a filesystem mailbox and background Windows UI Automation. Use when the user asks for chat-mode, 暢聊模式, a Codex/Claude design discussion or review, or wants Codex to operate Claude Desktop without taking over the foreground desktop.
 ---
 
-## Quick Reference
+# Chat Mode
 
-### Trigger Decision
+Run Codex as the orchestrator and Claude Desktop Code as a bounded review worker. Keep the user's desktop available by controlling Claude through Windows UI Automation (UIA), not screen coordinates.
 
-When the user says `chat-mode`, `暢聊模式`, or asks for a bounded Codex/Claude multi-round session, this is a request to run the chat-mode protocol, not just smoke tests.
+## Core rules
 
-If `tools/chat-mode-run.ps1` exists, run it. Smoke tests are only verification helpers and are not a substitute for a chat-mode session.
+1. Keep Codex as the only orchestrator. Claude must not invoke Codex or start a nested chat-mode loop.
+2. Use files for durable requests and transcripts. Use UIA as the control plane and as the tested response-reading path.
+3. Never approve a workspace trust or permission dialog automatically. Stop and ask the user.
+4. For review or discussion, set Claude to `Manual` and explicitly forbid edits, commits, pushes, and destructive commands.
+5. Bound every session by turns, time, and response size. Default to 3 turns and a 5-minute limit per Claude turn.
+6. If tracked files may change, require a Git repository and a baseline commit first. Keep Claude read-only; Codex is the sole project writer.
 
-### Host Repo Selection
+Read [references/protocol.md](references/protocol.md) before starting a real session. On Windows, read [references/windows-uia.md](references/windows-uia.md) before controlling Claude Desktop.
 
-Before checking `.chat-mode/config.json`, reading state, or starting a new session, resolve the host repo root that owns the runner:
+## Workflow
 
-1. If the user gives a path, `cd` to that path when it contains `tools/chat-mode-run.ps1`.
-2. Otherwise, use the current working directory only if it contains `tools/chat-mode-run.ps1`.
-3. If the current directory does not contain the runner, search one directory level down for `*/tools/chat-mode-run.ps1`; if exactly one match exists, `cd` to that directory.
-4. If no runner or multiple runners are found, stop and ask which repo to use.
+### 1. Establish the contract
 
-Do not inspect or reuse a parent repo's `.chat-mode` directory unless that same repo also contains the runner.
+Confirm or infer:
 
-### Runner Mode: Default And Fully Automated
+- repository root;
+- task and Claude's role;
+- maximum turns and per-turn timeout;
+- read-only or edit-enabled session;
+- completion marker unique to the turn.
 
-If the host project contains `tools/chat-mode-run.ps1` and the user asks for CLI orchestration or a natural-language "chat-mode" / "暢聊模式" run, the runner is mandatory:
+Default to read-only. Do not expand authority merely to keep the loop moving.
 
-```powershell
-pwsh -NoProfile -File .\tools\chat-mode-run.ps1 `
-  -NewSession `
-  -Topic "<task>" `
-  -TaskSummary "<ascii-task-summary>" `
-  -MaxTurns 4 `
-  -FirstMover codex
-```
+### 2. Prepare a durable request
 
-The runner invokes both worker CLIs as subprocesses, writes the transcript, and updates state. Codex CLI does not require user intervention in runner mode.
-
-In runner mode:
-
-- Do not generate or print a mirrored prompt for the user to copy.
-- Do not ask the user to switch to Codex or Claude.
-- Do not use ScheduleWakeup or manual polling.
-- Do not simulate the other agent's rounds.
-- Do not replace the runner with `tests/smoke.ps1` or `tests/run-smoke.ps1`.
-- If the user says "you start" / `你先開始`, set `-FirstMover` to the current agent and run the runner.
-
-If `.chat-mode/config.json` is missing, run `tools/chat-mode-setup.ps1` from Codex first. If setup cannot be run from the current agent, stop and tell the user to start setup from Codex.
-
-If the runner fails, report the error and stop. Do not continue by roleplaying the missing worker output.
-
-On Windows, Codex worker calls may bypass sandbox even in review mode because Codex sandbox modes can block file inspection. The runner records `diff_stat_after` and `git status` after each worker call; inspect those results before recommending a commit or push.
-
-### Manual Fallback Only
-
-Use the rest of this document only when `tools/chat-mode-run.ps1` is unavailable or the user explicitly asks for manual file-backed handoff. It does not apply to runner mode.
-
-### Priority Rule
-
-In chat-mode, polling is the primary responsibility after each round.
-
-A round is not complete until:
-
-1. Round content is written to the session file at `session_file`.
-2. The shared state file is updated.
-3. ScheduleWakeup has been scheduled.
-4. The first scheduled poll has actually executed.
-5. The state file and session file have been re-read after that poll.
-
-Do not send a final or completion-style user message before step 4.
-If round content is written but polling has not started, the turn is still incomplete.
-
-### Default Layout
-
-The companion scripts default to this host-project layout:
+Create a request under:
 
 ```text
-.chat-mode/
-  agent-sync-state.json
-  sessions/
-    YYYY-MM-DD-{slug}.md
-  wakeup-logs/
+.chat-mode/exchange/<session-id>/turn-0001.request.md
 ```
 
-Scripts may override paths with `-StatePath`, `-SessionDir`, and `-LogDir`.
+Include the envelope defined in the protocol reference. Keep `.chat-mode/` ignored by Git.
 
-### Round Completion Checklist
+For a minimal session, Claude may answer in its chat while ending with the unique marker. For very large responses, request a response file only when the user has authorized Claude to write inside the exchange directory.
 
-After writing round content, complete these steps in order before ending the response:
+### 3. Open Claude Desktop Code
 
-1. Write round content to the session file at `session_file`.
-2. Update `current_turn`, `current_agent`, `poll_interval_seconds`, `next_check_at`, and `updated_at` in the shared state file.
-3. Schedule ScheduleWakeup using the same interval as `poll_interval_seconds`.
-4. Announce in commentary: `Round written. State updated. Wakeup scheduled. Entering polling loop now.`
-5. If the turn limit has not been reached, start the polling retry loop and do not end the response before the first poll.
-6. Re-read the shared state file and the session file at `session_file` after the first poll.
-7. If the turn limit has been reached, set `status=done`, `current_agent=user`, and `stop_reason=turn_limit_reached`.
-
-Skipping any step means the other agent cannot proceed autonomously.
-
----
-
-## Manual Activation Checklist
-
-Activation must show the mirrored prompt before any long-running work, then continue the session in the same response when the receiving agent is the first mover. This lets the user copy the prompt immediately without delaying round 1.
-
-### Immediate Prompt And Setup
-
-- [ ] Parse: mode, turn/time limit, first mover, topic.
-- [ ] Generate the mirrored start line and display it to the user before writing round content.
-- [ ] Write the shared state file with `status: in_progress`, `current_turn: 0`, and `current_agent` set to the first mover.
-- [ ] Create the session file skeleton.
-- [ ] Treat setup as bootstrap only; do not imply round 1 exists until it is present in the session file.
-
-### If This Agent Is The First Mover
-
-- [ ] Re-read the shared state file to confirm `current_agent` is still self.
-- [ ] Write round 1 content to the session file.
-- [ ] Choose the next polling interval based on the next agent's expected work.
-- [ ] Update `current_turn`, `current_agent`, `poll_interval_seconds`, `next_check_at`, and `updated_at` in state.
-- [ ] Schedule ScheduleWakeup using the same interval as `poll_interval_seconds`.
-- [ ] Announce: `Round 1 written. State updated. Wakeup scheduled. Entering polling loop now.`
-- [ ] Enter the polling retry loop.
-
-If this agent is not the first mover, end after prompt/setup. Do not write round 1 on behalf of the first mover. If a local wakeup mechanism is available, schedule a passive recheck so this agent can resume after the first mover updates state; the passive recheck must only read state/session and must not create round content until `current_agent` is self.
-
-Do not proceed if any step cannot be completed.
-
----
-
-## Manual Mirrored-Start Rule
-
-When the user starts a session with one agent, generate a copy-ready message for the other agent.
-
-- Preserve the original first mover.
-- Mirror only the addressee and agent names.
-- Keep the user's chat-mode trigger phrase verbatim when one is provided.
-- Wrap the message in a code block so it is copy-pasteable.
-- Display the mirrored prompt before writing round content.
-
-If the receiving agent is the first mover, display the mirrored prompt first, then continue in the same response to write round 1 and start polling.
-
----
-
-## State File
-
-The companion starter writes a JSON file like this:
-
-```json
-{
-  "current_agent": "codex | claude | user",
-  "status": "waiting | in_progress | done | interrupted",
-  "task": "English one-line task summary",
-  "session_file": ".chat-mode/sessions/YYYY-MM-DD-slug.md",
-  "conversation_mode": "turn-based | timed | hybrid",
-  "limit_minutes": null,
-  "max_turns": 4,
-  "current_turn": 0,
-  "poll_interval_seconds": 90,
-  "next_check_at": "YYYY-MM-DDTHH:MM:SS+08:00",
-  "last_checked_at": "YYYY-MM-DDTHH:MM:SS+08:00",
-  "started_at": "YYYY-MM-DDTHH:MM:SS+08:00",
-  "stop_reason": null,
-  "updated_by": "codex | claude",
-  "updated_at": "YYYY-MM-DDTHH:MM:SS+08:00"
-}
-```
-
-Keep all machine-oriented JSON values in English / ASCII. Put user-facing prose in the session markdown file.
-
----
-
-## Polling Defaults
-
-Choose the interval based on what the next agent is expected to do:
-
-| Next task type | Interval | Max retries | Total wait |
-| --- | --- | --- | --- |
-| Trivial / acknowledgement | 60 s | 3 | about 3 min |
-| Reasoning / planning | 90 s | 4 | about 6 min |
-| File inspection / verify | 120 s | 4 | about 8 min |
-
-After completing a turn, run this retry loop:
-
-1. Choose the interval for the next agent's expected task.
-2. Write `poll_interval_seconds` and `next_check_at` to state.
-3. Schedule ScheduleWakeup using that same interval.
-4. Announce that the wakeup is scheduled and polling is starting.
-5. Wait the interval in-turn; do not end the response before polling.
-6. Re-read the state file and the session file at `session_file`.
-7. If `current_agent == self`, act on the session and close if the turn limit has been reached.
-8. If `current_agent != self` and retry < max, increment retry and continue polling.
-9. If retry == max, set `status=interrupted`, `stop_reason={agent}_timeout`, and `current_agent=user`.
-
-Do not stop after one wait. Repeat until ownership changes or retries are exhausted.
-Do not treat "round content written" as the turn boundary. Polling is the real turn boundary.
-Wakeup interval must match `poll_interval_seconds`; do not use an independent timer.
-
-Wakeup prompt pattern:
+Prefer the deep link:
 
 ```text
-[Retry N/MAX, Xs] Read the shared state file, then open session_file. If my turn, respond. If not my turn and retry < max, wait Xs and recheck. Else timeout.
+claude://code/new?q=<url-encoded-poke>&folder=<url-encoded-repo-root>
 ```
 
----
+The poke should be short, for example:
 
-## End State
-
-When the turn limit, time limit, or manual stop is reached:
-
-```json
-{
-  "status": "done",
-  "current_agent": "user",
-  "stop_reason": "turn_limit_reached | time_limit_reached | manual_stop"
-}
+```text
+Read .chat-mode/exchange/<session-id>/turn-0001.request.md, follow its contract, respond here, and end with <marker>.
 ```
 
-Always reset `current_agent` to `user` when closing.
+If Claude displays `Trust this workspace?`, ask the user to verify the path and click `Trust Workspace`. Do not click it for them.
 
----
+### 4. Configure Claude without taking foreground focus
 
-## Known Failure Modes
+Use `scripts/claude-desktop-uia.ps1` or equivalent native UIA calls.
 
-1. **Mirrored start accidentally changes first mover** - check that the mirrored message names the same first mover as the original.
-2. **Mirrored start claims round 1 exists before it is written** - bootstrap only creates state and session files; the current agent must verify the session before continuing.
-3. **Single wait instead of retry loop** - waiting once and reporting back to the user is not enough.
-4. **Non-ASCII state JSON values** - keep task and all state fields in English / ASCII.
-5. **Session closes without resetting current_agent to user** - always set `current_agent: user` on close.
-6. **Polling before other agent finishes** - read the session file to confirm what was done before acting.
-7. **Mistaking content completion for turn completion** - if the first poll has not run, the turn is not complete.
-8. **`session_file` missing or unreadable** - stop and report; do not fall back to another file.
-9. **`current_turn` in state does not match round count in session file** - report mismatch and pause for resolution; do not auto-repair.
-10. **`updated_at` is stale and status is `in_progress`** - if `updated_at` is more than 30 minutes old, surface a warning before writing anything; do not treat it as an automatic stop.
-11. **ScheduleWakeup fires but expected round is absent from session file** - if `current_turn` is N but the session file does not contain a completed Round N, do not infer, continue, or repair; report the mismatch and pause for resolution.
+- Select the strongest available Opus model for the first architecture or adversarial review.
+- Use Sonnet for repeated routine turns when speed or usage matters.
+- Set `Manual` for discussion and review.
+- Identify controls by accessible name and control type.
+- Fail on zero or multiple matches instead of guessing.
+
+Do not use hard-coded screen coordinates unless the user explicitly accepts a fragile, visible fallback.
+
+### 5. Send and monitor
+
+Invoke the accessible `Send` button. Poll the Claude document text for the unique completion marker in intervals shorter than 60 seconds. Share progress with the user between waits.
+
+Treat any of the following as a hard stop:
+
+- unexpected permission or trust dialog;
+- malformed or missing marker;
+- focus-sensitive behavior that could type into the wrong application;
+- timeout or output-size limit;
+- unexpected project mutation;
+- user-created `.chat-mode/STOP` file.
+
+### 6. Bring the result back
+
+Read the complete Claude document through `TextPattern.DocumentRange`, extract the response associated with the current request, and preserve it in the session transcript. Do not rely on screenshots or OCR for long text.
+
+Codex evaluates Claude's recommendations; it does not automatically execute them. Continue only while the bounded contract permits another turn.
+
+### 7. Close cleanly
+
+Record the final result and stop reason. Return control to the user. Report whether any files changed and whether the completion marker was observed.
+
+## Fallback order
+
+1. Filesystem request plus background UIA control and response reading.
+2. Filesystem request plus a user-approved response file.
+3. Visible Computer Use only for controls UIA cannot expose.
+4. Manual user action for trust and permission decisions.
+
+Never fall back to the removed PowerShell CLI runner, polling state machine, coordinate clicking, or simulated worker output.

@@ -1,159 +1,74 @@
 # chat-mode-skill
 
-`chat-mode-skill` is a Codex Skill and small toolkit for running bounded agent-to-agent collaboration between Codex and Claude Code. It uses a shared state file, one markdown file per session, mirrored start prompts, and ScheduleWakeup-style polling so two agents can discuss, review, and refine a task without the user manually relaying every turn.
+`chat-mode-skill` lets Codex coordinate bounded review and discussion with Claude Desktop Code on Windows without occupying the foreground desktop.
+
+The current design uses:
+
+- filesystem request files and transcripts for durable context;
+- Windows UI Automation (UIA) to operate Claude Desktop in the background;
+- accessible document text instead of screenshots or OCR for responses;
+- explicit human approval for workspace trust and permission dialogs.
+
+The previous PowerShell CLI runner and polling toolkit has been retired.
 
 ## Requirements
 
+- Windows 11
 - Codex with local Skill support
-- Claude Code or another second agent that can read and write files in the same host project
-- PowerShell 7.6.1 or newer for the helper scripts. Use `pwsh`, not Windows PowerShell 5.1 (`powershell.exe`).
-- A host project where both agents can access the same working tree
+- Claude Desktop with Code access, signed in
+- PowerShell 7 (`pwsh`)
+- both agents able to read the same local repository
 
 ## Install
 
-1. Clone this repository.
+Clone the repository and copy the skill into the Codex skills directory:
 
-   ```powershell
-   git clone https://github.com/chianwu-hash/chat-mode-skill.git
-   ```
+```powershell
+git clone https://github.com/chianwu-hash/chat-mode-skill.git
+cd chat-mode-skill
+pwsh -NoProfile -File .\install.ps1
+```
 
-2. Run the installer for your platform.
+On macOS or Linux, `./install.sh` installs the skill files for inspection, but the tested Claude Desktop UIA adapter is Windows-only.
 
-   Linux/macOS:
+Restart Codex after installation so it discovers the updated skill.
 
-   ```bash
-   ./install.sh
-   ```
+## Use
 
-   Windows:
-
-   ```powershell
-   .\install.ps1
-   ```
-
-   To also copy helper scripts into a host project:
-
-   ```bash
-   ./install.sh --tools-target ../your-host-project/tools
-   ```
-
-   ```powershell
-   .\install.ps1 -ToolsTarget ..\your-host-project\tools
-   ```
-
-   The installers check for `git`, `pwsh`, `codex`, and `claude`. They can auto-install `git` and `pwsh` on supported platforms, while `codex` and `claude` remain account-based tools that are reported as warnings when missing. Project scripts are intended to run under PowerShell 7.6.1+ through `pwsh`.
-
-3. Manual install is also supported. Copy the skill folder into your Codex skills directory.
-
-   ```powershell
-   Copy-Item -Recurse .\chat-mode-skill\skills\chat-mode $env:USERPROFILE\.codex\skills\chat-mode
-   ```
-
-   The exact Codex skills directory may vary by installation. On Windows, `$env:USERPROFILE\.codex\skills\` is the common default. On macOS/Linux, it is commonly `~/.codex/skills/`. If your Codex setup uses `CODEX_HOME`, install to `$env:CODEX_HOME\skills\chat-mode` on PowerShell or `$CODEX_HOME/skills/chat-mode` in POSIX shells.
-
-4. Copy the helper scripts into any host project where you want chat-mode support.
-
-   ```powershell
-   Copy-Item -Recurse .\chat-mode-skill\tools .\your-host-project\tools
-   ```
-
-The helper scripts default to this host-project layout:
+Ask naturally, for example:
 
 ```text
-.chat-mode/
-  agent-sync-state.json
-  config.json
-  sessions/
-  tmp/
-  wakeup-logs/
+啟動 chat-mode，讓你和 Claude 用三個回合審查這個架構。Claude 只讀，不要修改檔案。
 ```
 
-You can override paths with `-StatePath`, `-SessionDir`, and `-LogDir` where supported.
+Codex should:
 
-## Quick Start
+1. write a bounded request under `.chat-mode/exchange/`;
+2. open the repository in Claude Desktop Code;
+3. stop for any workspace trust or permission decision;
+4. select the requested model and `Manual` mode through background UIA;
+5. send a short request-file pointer;
+6. read Claude's accessible response text until the unique completion marker appears;
+7. evaluate the response and return the result to the user.
 
-Natural language trigger:
+Successful UIA actions do not move the mouse, synthesize keystrokes, or bring Claude to the foreground.
 
-```text
-啟動暢聊模式 4 回合，檢視 chat-mode-skill 是否能順利運作，是否可以 commit+push，你先開始
-```
+## Safety model
 
-In this repository, agents should interpret that as a request to use `tools/chat-mode-run.ps1` for real CLI orchestration. They should not manually roleplay the other agent.
+- Codex owns the loop; Claude never starts another agent loop.
+- Claude is read-only by default; Codex is the sole project writer.
+- Trust and permission dialogs are never auto-approved.
+- Sessions have turn, time, and response-size bounds.
+- `.chat-mode/STOP` aborts the session.
+- Screenshots and OCR are not the source of truth for long responses.
+- Unexpected mutation or ambiguous UI state stops the session.
 
-Smoke tests such as `tests/smoke.ps1` and `tests/run-smoke.ps1` verify scripts, but they are not the chat-mode session itself.
+The canonical protocol is [skills/chat-mode/references/protocol.md](skills/chat-mode/references/protocol.md). Windows adapter details are in [skills/chat-mode/references/windows-uia.md](skills/chat-mode/references/windows-uia.md).
 
-For CLI orchestration, run first setup from Codex so the project records verified CLI paths for this host:
+## Evidence
 
-```powershell
-pwsh -NoProfile -File .\tools\chat-mode-setup.ps1
-```
-
-If Claude Code starts first and `.chat-mode/config.json` does not contain a verified `codex_exe`, it should stop and ask the user to run this setup from Codex.
-
-Then run a real 4-turn CLI-orchestrated session:
-
-```powershell
-pwsh -NoProfile -File .\tools\chat-mode-run.ps1 `
-  -NewSession `
-  -Topic "review the release plan" `
-  -TaskSummary "review release plan" `
-  -MaxTurns 4 `
-  -FirstMover claude
-```
-
-`chat-mode-run.ps1` calls both worker CLIs as subprocesses, appends each response to the session markdown, and updates state. Do not manually simulate worker rounds when this runner is available.
-
-On Windows, Codex worker calls default to `-CodexBypassSandbox $true` because Codex sandbox modes can block even file reads. Review-mode safety is enforced by the runner comparing `git diff --stat` and `git status --short` before and after each worker call.
-
-### Remote SSH Workers
-
-`chat-mode-run.ps1` can run either worker through SSH while keeping orchestration state on the local machine. This is intended for a Windows control machine that invokes Codex or Claude inside a Linux checkout.
-
-```powershell
-pwsh -NoProfile -File .\tools\chat-mode-run.ps1 `
-  -NewSession `
-  -Topic "review remote ssh mode" `
-  -TaskSummary "review remote ssh mode" `
-  -MaxTurns 4 `
-  -FirstMover codex `
-  -CodexTransport ssh `
-  -CodexRemoteHost user@linux-host `
-  -CodexRemoteRepoPath /home/user/project `
-  -CodexRemoteExe codex
-```
-
-Use `-ClaudeTransport ssh` with the matching `-ClaudeRemoteHost`, `-ClaudeRemoteRepoPath`, and `-ClaudeRemoteExe` parameters when Claude should run remotely too. Remote mode requires non-interactive `ssh`, remote `pwsh` 7.6.1+, `git`, a clean local worktree, a clean remote worktree, matching local/remote `HEAD`, and the worker CLI available on the remote host. The runner stages prompt/session/state snapshots remotely, captures stdout/stderr locally, and aborts if the remote worktree changes during a read-only worker call.
-
-From the host project, start a 4-turn session:
-
-```powershell
-pwsh -NoProfile -File .\tools\chat-mode-start.ps1 `
-  -Topic "review the release plan" `
-  -MaxTurns 4 `
-  -FirstMover codex `
-  -TaskSummary "review release plan" `
-  -WritePromptFile
-```
-
-The command creates:
-
-- `.chat-mode/agent-sync-state.json`
-- `.chat-mode/sessions/YYYY-MM-DD-review-release-plan.md`
-- `.chat-mode/claude-start-prompt.txt` when `-WritePromptFile` is used
-
-Copy the mirrored prompt to Claude Code. The starter only bootstraps the state and session files; it does not write round 1. The agent named by `current_agent` writes the next round. If Codex is the first mover, Codex should show the prompt first, then write round 1 in the same response and enter the polling loop. If Claude Code is the first mover, Codex should stop after prompt/setup or schedule a passive recheck.
-
-## Protocol Summary
-
-- The state file is the entry point.
-- The `session_file` field points to the active markdown transcript.
-- Round content goes into the session file, not into handoff notes.
-- The starter creates state/session files and leaves `current_agent` set to the first mover.
-- The current agent writes its round, updates state, schedules wakeup, and runs at least the first poll.
-- When the turn limit is reached, set `status=done`, `current_agent=user`, and `stop_reason=turn_limit_reached`.
-
-See [Claude CLI Orchestration Proposal](docs/claude-cli-orchestration.md) for the proposed smoother path where Codex invokes Claude CLI directly and keeps polling as a fallback. The related [CLI Flag Validation](docs/cli-flag-validation.md) and [Worker Prompt Template](docs/worker-prompt-template.md) documents capture the current implementation prerequisites.
+The first end-to-end background UIA run is recorded in [docs/smoke-test-2026-08-08.md](docs/smoke-test-2026-08-08.md).
 
 ## Status
 
-This project is experimental. The first release target is `v0.1.0`, focused on a clear protocol, a portable Skill, PowerShell helper scripts, and smoke tests.
+Experimental. The 2026-08-08 smoke test validated one read-only Codex-to-Claude turn with Claude Opus 5, High effort, Manual mode, background send, and complete response extraction.

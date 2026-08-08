@@ -1,0 +1,4 @@
+interface:
+  display_name: "Chat Mode"
+  short_description: "Coordinate Codex and Claude without desktop takeover"
+  default_prompt: "Use $chat-mode to run a bounded read-only review with Claude Desktop in the background."
