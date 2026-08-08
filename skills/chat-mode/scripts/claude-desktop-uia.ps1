@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('List', 'Expand', 'Select', 'Invoke', 'ReadDocument', 'WaitText')]
+    [ValidateSet('List', 'Expand', 'Select', 'Invoke', 'ApprovePrompt', 'ApproveWorkspaceTrust', 'ReadDocument', 'WaitText')]
     [string]$Action = 'List',
 
     [string]$ProcessName = 'claude',
@@ -146,6 +146,40 @@ function Get-DocumentText {
     return $longest
 }
 
+function Invoke-Element {
+    param([System.Windows.Automation.AutomationElement]$Element)
+
+    $invokePattern = $null
+    if (-not $Element.TryGetCurrentPattern(
+            [System.Windows.Automation.InvokePattern]::Pattern,
+            [ref]$invokePattern
+        )) {
+        throw "Control '$($Element.Current.Name)' does not support Invoke."
+    }
+    if (-not $Element.Current.IsEnabled) {
+        throw "Control '$($Element.Current.Name)' is disabled."
+    }
+    if ($Element.Current.IsOffscreen) {
+        throw "Control '$($Element.Current.Name)' is offscreen."
+    }
+
+    $invokePattern.Invoke()
+}
+
+function Assert-SpecificTextRegex {
+    param([string]$Pattern)
+
+    if (
+        [string]::IsNullOrWhiteSpace($Pattern) -or
+        $Pattern.Length -lt 8 -or
+        $Pattern -in @('.*', '.+', '^.*$', '^.+$')
+    ) {
+        throw 'Approval actions require a contract-specific -TextRegex.'
+    }
+
+    $null = [regex]::new($Pattern)
+}
+
 $root = Get-ClaudeRoot
 
 switch ($Action) {
@@ -196,15 +230,82 @@ switch ($Action) {
 
     'Invoke' {
         $element = Get-UniqueElement -Root $root -Pattern $NameRegex -ExpectedType $ControlType
-        $invokePattern = $null
-        if (-not $element.TryGetCurrentPattern(
-                [System.Windows.Automation.InvokePattern]::Pattern,
-                [ref]$invokePattern
-            )) {
-            throw "Control '$($element.Current.Name)' does not support Invoke."
-        }
-        $invokePattern.Invoke()
+        Invoke-Element -Element $element
         Write-Output "invoked: $($element.Current.Name)"
+        break
+    }
+
+    'ApprovePrompt' {
+        Assert-SpecificTextRegex -Pattern $TextRegex
+
+        $trustElements = @(Get-MatchingElements `
+                -Root $root `
+                -Pattern '(?i)^Trust this workspace\?$' `
+                -ExpectedType 'Any')
+        if ($trustElements.Count -gt 0) {
+            throw 'ApprovePrompt refuses workspace trust dialogs.'
+        }
+
+        $prompt = Get-UniqueElement `
+            -Root $root `
+            -Pattern $TextRegex `
+            -ExpectedType 'Any'
+        if (-not $prompt.Current.IsEnabled -or $prompt.Current.IsOffscreen) {
+            throw "Prompt control '$($prompt.Current.Name)' is not available."
+        }
+
+        $allow = Get-UniqueElement `
+            -Root $root `
+            -Pattern '^Allow once(?:\s+\d+)?$' `
+            -ExpectedType 'Button'
+        $deny = Get-UniqueElement `
+            -Root $root `
+            -Pattern '^Deny(?:\s+\d+)?$' `
+            -ExpectedType 'Button'
+        if (-not $deny.Current.IsEnabled -or $deny.Current.IsOffscreen) {
+            throw "Control '$($deny.Current.Name)' is not available."
+        }
+
+        $allowName = $allow.Current.Name
+        Invoke-Element -Element $allow
+        Write-Output "approved prompt once: $allowName"
+        break
+    }
+
+    'ApproveWorkspaceTrust' {
+        Assert-SpecificTextRegex -Pattern $TextRegex
+
+        $trustHeadings = @(Get-MatchingElements `
+                -Root $root `
+                -Pattern '(?i)^Trust this workspace\?$' `
+                -ExpectedType 'Any')
+        if ($trustHeadings.Count -eq 0) {
+            throw 'No workspace trust dialog was detected.'
+        }
+
+        $path = Get-UniqueElement `
+            -Root $root `
+            -Pattern $TextRegex `
+            -ExpectedType 'Any'
+        if (-not $path.Current.IsEnabled -or $path.Current.IsOffscreen) {
+            throw "Workspace path control '$($path.Current.Name)' is not available."
+        }
+
+        $trust = Get-UniqueElement `
+            -Root $root `
+            -Pattern '^Trust Workspace(?:\s+\d+)?$' `
+            -ExpectedType 'Button'
+        $cancel = Get-UniqueElement `
+            -Root $root `
+            -Pattern '^Cancel(?:\s+\d+)?$' `
+            -ExpectedType 'Button'
+        if (-not $cancel.Current.IsEnabled -or $cancel.Current.IsOffscreen) {
+            throw "Control '$($cancel.Current.Name)' is not available."
+        }
+
+        $trustName = $trust.Current.Name
+        Invoke-Element -Element $trust
+        Write-Output "approved workspace trust: $trustName"
         break
     }
 

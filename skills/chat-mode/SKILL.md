@@ -11,11 +11,11 @@ Run Codex as the orchestrator and Claude Desktop Code as either a bounded review
 
 1. Keep Codex as the only orchestrator. Claude must not invoke Codex or start a nested chat-mode loop.
 2. Use files for durable requests and transcripts. Use UIA as the control plane and as the tested response-reading path.
-3. Never approve a workspace trust or permission dialog automatically. Stop and ask the user.
+3. Treat the user's task as delegated authority for necessary project-local reads, in-scope writes, and declared validation. Let Codex verify and approve matching Claude prompts; ask the user only when authority would expand or risk materially changes.
 4. For review or discussion, set Claude to `Manual` and explicitly forbid edits, commits, pushes, and destructive commands.
 5. Bound every session by turns, time, and response size. Default to 3 turns and a 5-minute limit per Claude turn.
 6. Use one writer per working tree. In review mode, Codex is the sole project writer. In isolated-implementer mode, Claude writes only in its dedicated worktree while the main worktree remains untouched.
-7. Require a Git repository, clean main worktree, baseline commit, dedicated branch, explicit `write_scope`, authorized command set, and one session-specific user approval before isolated implementation.
+7. Require a Git repository, clean main worktree, baseline commit, dedicated branch, explicit `write_scope`, and authorized action and command sets before isolated implementation.
 
 Read [references/protocol.md](references/protocol.md) before starting a real session. On Windows, read [references/windows-uia.md](references/windows-uia.md) before controlling Claude Desktop.
 
@@ -32,6 +32,7 @@ Confirm or infer:
 - maximum turns and per-turn timeout;
 - `review` or `isolated-implementer` mode;
 - write scope when implementation is requested;
+- actions and commands delegated by the user's request;
 - completion marker unique to the turn.
 
 Default to read-only. Do not expand authority merely to keep the loop moving.
@@ -72,7 +73,7 @@ Read .chat-mode/exchange/<session-id>/turn-0001.request.md, follow its contract,
 
 Use the main repository as `folder` for review mode and the isolated worktree as `folder` for implementation mode.
 
-If Claude displays `Trust this workspace?`, ask the user to verify the exact path and click `Trust Workspace`. Do not click it for them.
+If Claude displays `Trust this workspace?`, compare the accessible path with the exact repository or isolated worktree in the contract. Use the guarded `ApproveWorkspaceTrust` action when it matches uniquely. Stop and ask the user on mismatch or ambiguity.
 
 ### 5. Configure Claude without taking foreground focus
 
@@ -81,23 +82,25 @@ Use `scripts/claude-desktop-uia.ps1` or equivalent native UIA calls.
 - Select the strongest available Opus model for the first architecture or adversarial review.
 - Use Sonnet for repeated routine turns when speed or usage matters.
 - Set `Manual` for discussion and review.
-- Before implementation, show the user the exact worktree path, branch, base commit, `write_scope`, and authorized commands once.
-- After the user explicitly approves that session tuple, set `Accept edits` for the isolated Claude session so individual file edits do not require repeated approval.
+- Record and report the exact worktree path, branch, base commit, `write_scope`, and authorized actions and commands before implementation.
+- When the user's task already authorizes those in-scope writes, set `Accept edits` for the isolated Claude session without requesting another confirmation.
 - Keep `Manual` when the user requests per-edit confirmation or the repository is unusually sensitive.
 - Identify controls by accessible name and control type.
 - Fail on zero or multiple matches instead of guessing.
 
 Do not use hard-coded screen coordinates unless the user explicitly accepts a fragile, visible fallback.
 
-`Accept edits` is not an OS-level path sandbox. It permits file edits in the trusted Claude workspace; isolation and post-turn `write_scope` inspection bound the risk. Never auto-approve shell, Git, workspace trust, or other unexpected permission dialogs.
+`Accept edits` is not an OS-level path sandbox. It permits file edits in the trusted Claude workspace; isolation and post-turn `write_scope` inspection bound the risk. Never use `Bypass permissions` as the default.
 
 ### 6. Send and monitor
 
 Invoke the accessible `Send` button. Poll the Claude document text for the unique completion marker in intervals shorter than 60 seconds. Share progress with the user between waits.
 
+When Claude opens a permission prompt, compare its accessible text with the recorded contract. Use `ApprovePrompt` only for an exact, expected action and only when the helper finds one `Allow once` and one `Deny` control. This may include in-scope file access or a validation command already authorized by the task. Reject or escalate prompts for Git operations assigned to Codex, out-of-scope paths, undeclared commands, credentials, production or deployment access, destructive actions, or unexpected network access.
+
 Treat any of the following as a hard stop:
 
-- unexpected permission or trust dialog;
+- unexpected, ambiguous, or contract-expanding permission or trust dialog;
 - malformed or missing marker;
 - focus-sensitive behavior that could type into the wrong application;
 - timeout or output-size limit;
@@ -123,6 +126,6 @@ Record the final result and stop reason. Return control to the user. Report the 
 1. Filesystem request plus background UIA control and response reading.
 2. Filesystem request plus a user-approved response file.
 3. Visible Computer Use only for controls UIA cannot expose.
-4. Manual user action for trust and permission decisions.
+4. Manual user action when authority expansion or ambiguous UI state requires a decision.
 
 Never fall back to the removed PowerShell CLI runner, polling state machine, coordinate clicking, or simulated worker output.

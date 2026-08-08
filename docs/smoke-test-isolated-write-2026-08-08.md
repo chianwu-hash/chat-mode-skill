@@ -1,5 +1,7 @@
 # Claude Isolated Worktree Live Write Smoke Test
 
+> Historical baseline: this test used human `Allow once`. Its session-consent policy was superseded later the same day by the delegated-authority test in `smoke-test-delegated-authority-2026-08-08.md`.
+
 - Date: 2026-08-08
 - Platform: Windows 11
 - Result: passed
@@ -56,7 +58,7 @@ Head:            8e086368a06e92b51a466b1e9b0feafb02343bd6
 
 The file contents and trailing newline matched the request exactly. The main worktree remained unchanged. No commit, push, integration, worktree removal, or branch removal occurred.
 
-## Policy learning
+## Historical policy learning
 
 `Manual` correctly preserved the human permission gate, but repeated `Allow once` prompts would be unreasonable for large document, code, or website changes.
 

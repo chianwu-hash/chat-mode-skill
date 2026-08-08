@@ -16,8 +16,8 @@ Use this mode only when the user explicitly asks Claude to create or modify many
 - Let Claude write only inside the isolated worktree.
 - Do not let Codex edit tracked files in that worktree while Claude owns the turn.
 - Do not let Claude access or modify the main worktree, manage worktrees, switch branches, commit, push, or invoke another agent.
-- Keep trust and permission dialogs as human decisions.
-- Treat edit consent as specific to one exact worktree, branch, base commit, `write_scope`, and authorized command set.
+- Let Codex handle contract-matching trust and permission dialogs; reserve user escalation for expanded or materially riskier authority.
+- Bind delegated authority to one exact worktree, branch, base commit, `write_scope`, and authorized action and command set.
 - Do not integrate changes merely because Claude produced a completion marker.
 
 ## Prepare
@@ -50,28 +50,30 @@ chat-mode/claude-<session-id>
 
 It also records `.chat-mode/session.json` inside the isolated worktree.
 
-## Session-level edit consent
+## Delegated authority contract
 
-After preparation, show the user exactly:
+After preparation, record and report:
 
 - the isolated worktree path;
 - branch and base commit;
 - declared `write_scope`;
-- requested validation commands;
+- authorized actions and validation commands;
 - that `Accept edits` is UI permission rather than an OS path sandbox.
 
-Ask once for approval of that tuple. After explicit approval, use background UIA to set the isolated Claude session to `Accept edits`. Do not require `Allow once` for every file edit.
+The user's implementation request delegates ordinary project-local reads, in-scope writes, and necessary validation already implied by the task. Do not request a second confirmation for that same authority. Use background UIA to set the isolated Claude session to `Accept edits`, or keep `Manual` when testing prompt approval or when the contract requires per-action review.
 
-Consent expires when the session ends or when the worktree, branch, base commit, scope, or requested command set changes. Any such change requires a new user approval.
+Delegation expires when the session ends. Re-evaluate any change to the worktree, branch, base commit, scope, action set, or command set. Ask the user only when the change expands the original request or materially changes its risk.
 
 Keep `Manual` instead when the user requests per-edit approval, secrets or production credentials are present, or the isolated worktree is not an adequate risk boundary.
 
-Even after session consent, never auto-approve:
+Codex may approve a Claude prompt only after accessible text identifies an exact contract-matching action. Examples include an in-scope file write or a declared test command. Use the guarded UIA helper so the text check and button invocation happen in one operation.
 
-- workspace trust dialogs;
-- shell or Git commands;
+Do not approve:
+
+- workspace trust for a path other than the exact recorded worktree;
+- Git commands assigned to Codex;
 - access outside the isolated workspace;
-- credential, network, deployment, or other unexpected permission prompts.
+- undeclared commands, destructive operations, credentials, production or deployment access, or unexpected network prompts.
 
 `write_scope` is enforced after changes are made. A violation makes the result ineligible for integration; it does not prove the out-of-scope write never occurred.
 
@@ -88,6 +90,8 @@ Use these envelope fields:
 ```yaml
 mode: isolated-implementer
 permission: isolated-write
+authority: delegated
+approval_policy: contract-matched
 main_repo: <absolute-main-repo>
 worktree_path: <absolute-isolated-worktree>
 worktree_branch: chat-mode/claude-<session-id>
@@ -95,6 +99,11 @@ base_commit: <sha>
 write_scope:
   - docs/**
   - src/**
+authorized_actions:
+  - read-project
+  - write-scope
+authorized_commands:
+  - <exact-validation-command>
 ```
 
 Tell Claude:
@@ -106,9 +115,9 @@ Tell Claude:
 - run only the tests and build commands listed in the request;
 - report changed files, commands, test results, unresolved risks, and the exact completion marker.
 
-Open Claude Desktop Code with `folder=<worktree_path>`. A new worktree may produce a new trust dialog; ask the user to verify the exact path.
+Open Claude Desktop Code with `folder=<worktree_path>`. If a new trust dialog appears, approve it only when its accessible path exactly matches `worktree_path`; otherwise stop.
 
-Use `Accept edits` only after the session-level consent above. Unexpected shell or permission dialogs still require the user.
+Use `Accept edits` under the delegated contract above. When Claude still prompts, let Codex approve only exact matches and stop on ambiguity or authority expansion.
 
 ## Handoff and inspection
 

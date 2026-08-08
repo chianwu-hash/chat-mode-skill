@@ -13,6 +13,6 @@ When a request identifies this Claude session as a chat-mode worker:
 - Return an independent review that challenges assumptions and identifies failure modes.
 - For implementation, report every changed path, command, test result, and unresolved risk.
 - End with the exact completion marker supplied in the request.
-- Stop and ask the user for any trust or permission decision.
+- Surface trust and permission prompts without bypassing them. Wait while Codex verifies them against the delegated contract.
 
 Codex is the orchestrator and the sole writer of the main worktree. In isolated-implementer mode, Claude temporarily owns tracked-file writes inside its dedicated worktree. Write a response file only when the request and user explicitly authorize writes inside `.chat-mode/exchange/`.

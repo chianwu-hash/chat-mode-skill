@@ -1,5 +1,7 @@
 # Claude Desktop Background UIA Smoke Test
 
+> Historical baseline: this read-only test treated every permission as a human checkpoint. Contract-matching permission handling was superseded later the same day by the delegated-authority test in `smoke-test-delegated-authority-2026-08-08.md`.
+
 - Date: 2026-08-08
 - Platform: Windows 11
 - Repository: `D:\projects\chat-mod`

@@ -8,7 +8,7 @@ The current design uses:
 - Windows UI Automation (UIA) to operate Claude Desktop in the background;
 - accessible document text instead of screenshots or OCR for responses;
 - sibling Git worktrees when Claude is explicitly asked to implement changes;
-- explicit human approval for workspace trust and permission dialogs.
+- Codex-managed approval for prompts that exactly match the delegated task contract.
 
 The previous PowerShell CLI runner and polling toolkit has been retired.
 
@@ -52,7 +52,7 @@ Codex should:
 
 1. write a bounded request under `.chat-mode/exchange/`;
 2. open the repository in Claude Desktop Code;
-3. stop for any workspace trust or permission decision;
+3. verify workspace trust and permission prompts against the task contract;
 4. select the requested model and the permission mode allowed by the session contract through background UIA;
 5. send a short request-file pointer;
 6. read Claude's accessible response text until the unique completion marker appears;
@@ -64,7 +64,9 @@ Successful UIA actions do not move the mouse, synthesize keystrokes, or bring Cl
 
 When the user explicitly asks Claude to modify files, Codex creates a clean sibling worktree and dedicated `chat-mode/claude-*` branch. Claude may write only inside that worktree and the declared path scope. The main worktree stays unchanged while Claude works.
 
-Codex shows the exact worktree, branch, base commit, scope, and authorized commands once. After the user approves that session tuple, Codex enables `Accept edits` so Claude does not request `Allow once` for every file. Shell, Git, trust, credential, network, deployment, and unexpected permission dialogs remain human decisions. The Claude session returns to `Manual` when the run ends.
+Codex records and reports the exact worktree, branch, base commit, scope, authorized actions, and commands. The user's implementation request delegates the ordinary project-local reads, in-scope writes, and validation needed for that task, so Codex enables `Accept edits` without asking for a second confirmation. When Claude still opens a prompt, Codex verifies its accessible text and may invoke `Allow once` for an exact contract match.
+
+Authority expansion still returns to the user. Examples include out-of-scope paths, destructive operations, credentials, production or deployment access, and unexpected network activity. Claude remains prohibited from Git operations assigned to Codex. The Claude session returns to `Manual` when the run ends.
 
 After Claude stops, Codex inspects the complete diff, checks scope, reproduces tests, and decides whether to apply or cherry-pick the result. Claude never commits, pushes, manages branches, or writes directly into the main worktree. Worktree cleanup remains a separate user-authorized action.
 
@@ -74,7 +76,8 @@ After Claude stops, Codex inspects the complete diff, checks scope, reproduces t
 - Claude is read-only by default; Codex is the sole main-worktree writer.
 - Isolated implementation uses one writer per worktree and an explicit `write_scope`.
 - `Accept edits` is session convenience, not path-level sandboxing; out-of-scope changes are rejected during inspection.
-- Trust and permission dialogs are never auto-approved.
+- Guarded UIA approval requires one uniquely matching prompt control plus visible, enabled `Allow once` and `Deny` controls; ambiguity fails closed.
+- `Bypass permissions` is not the normal local-workstation mode.
 - Sessions have turn, time, and response-size bounds.
 - `.chat-mode/STOP` aborts the session.
 - Screenshots and OCR are not the source of truth for long responses.
@@ -84,8 +87,8 @@ The canonical protocol is [skills/chat-mode/references/protocol.md](skills/chat-
 
 ## Evidence
 
-The first end-to-end background UIA review is recorded in [docs/smoke-test-2026-08-08.md](docs/smoke-test-2026-08-08.md). The first real isolated Claude write is recorded in [docs/smoke-test-isolated-write-2026-08-08.md](docs/smoke-test-isolated-write-2026-08-08.md).
+The first end-to-end background UIA review is recorded in [docs/smoke-test-2026-08-08.md](docs/smoke-test-2026-08-08.md). The first real isolated Claude write is recorded in [docs/smoke-test-isolated-write-2026-08-08.md](docs/smoke-test-isolated-write-2026-08-08.md). The delegated-authority prompt approval test is recorded in [docs/smoke-test-delegated-authority-2026-08-08.md](docs/smoke-test-delegated-authority-2026-08-08.md).
 
 ## Status
 
-Experimental. The 2026-08-08 tests validated background read-only review and a real Claude file write in an isolated worktree. The write test passed exact-content, branch/base, scope, diff-check, and unchanged-main-tree verification.
+Experimental. The 2026-08-08 tests validated background read-only review, isolated Claude writes, guarded workspace trust, and Codex-controlled `Allow once`. The delegated test passed exact-content, branch/base, scope, diff-check, and unchanged-main-tree verification without user interaction or `Bypass permissions`.

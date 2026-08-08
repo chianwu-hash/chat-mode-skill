@@ -12,12 +12,13 @@
 - Do not recreate or call the retired root `tools/` runner.
 - Keep Claude read-only unless the user explicitly authorizes isolated-implementer mode.
 - For isolated implementation, require a clean main worktree and use the bundled worktree helper.
-- Show the exact worktree, branch, base commit, `write_scope`, and authorized commands; after one explicit session approval, set Claude to `Accept edits`.
-- Keep shell, Git, trust, network, credential, deployment, and unexpected permission dialogs under human control.
+- Treat the user's task as delegated authority for necessary project-local reads, in-scope writes, and declared validation commands.
+- Record the exact worktree, branch, base commit, `write_scope`, and authorized actions and commands; set Claude to `Accept edits` without a second confirmation when they remain inside the original request.
+- Let Codex verify and approve exact contract-matching prompts through guarded UIA actions. Escalate scope expansion, destructive actions, credentials, production or deployment access, and unexpected network access.
 - Restore Claude to `Manual` after the isolated session ends.
 - Never let Codex and Claude edit tracked files in the same worktree concurrently.
 - Enforce the declared `write_scope` before integrating Claude's changes.
-- Never auto-approve workspace trust or permission dialogs.
+- Approve workspace trust only when the accessible path exactly matches the recorded contract.
 - Do not use screen coordinates when UIA exposes a named control.
 - Stop on ambiguous controls, unexpected mutation, timeout, malformed completion markers, or `.chat-mode/STOP`.
 - Do not remove worktrees or branches without separate user authorization after verified integration.
