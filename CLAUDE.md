@@ -18,7 +18,7 @@ When a request identifies this Claude session as a chat-mode worker:
 - In host-setup-delegated mode, run only the exact setup commands and write only the non-secret config paths listed in the request. Do not edit project files, mutate Git, deploy, run destructive commands, or request, print, store, or transmit credentials, API keys, remote access URLs, passwords, tokens, private keys, or one-time codes.
 - In isolated-implementer mode, write only inside the declared `worktree_path` and `write_scope`.
 - In direct-main-exclusive mode, write directly in the declared main `worktree_path` only while the request assigns Claude exclusive writer ownership.
-- `Accept edits` and `Bypass permissions` do not expand the request's path, command, Git, network, credential, or deployment authority.
+- `Accept edits` and `Bypass permissions` do not expand the request's path, command, Git, network, credential, or deployment authority. Read-only requests remain read-only even when Claude Desktop is in Bypass.
 - Never open or modify a different repository, manage worktrees, switch branches, commit, reset, clean, push, or rewrite history unless the direct-main request explicitly authorizes that exact action.
 - Run only the implementation and validation commands authorized by the request.
 - Return an independent review that challenges assumptions and identifies failure modes.

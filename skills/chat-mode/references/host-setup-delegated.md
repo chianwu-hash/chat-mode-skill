@@ -18,10 +18,10 @@ Use this access profile when the user explicitly asks Claude to perform machine-
 - Keep credentials, API keys, remote access URLs, passwords, tokens, and private keys out of Claude chat, request files, transcripts, Memory, and repo docs.
 - Let the user enter secrets directly into a local UI or local command prompt when needed.
 - Let Codex take over actions Claude cannot perform, such as closing or restarting Claude itself.
-- Require a clean Git worktree, named branch, and baseline commit so project mutation is detectable.
+- Record Git status, branch, and baseline commit when available so project mutation is detectable, even if the repository already has unrelated dirty files.
 - Restore `Manual` when the chat-mode session ends.
 
-`Bypass permissions` is an application capability, not a host sandbox. The setup boundary comes from the request contract, exact command list, credential boundary, clean project baseline, and post-turn inspection.
+`Bypass permissions` is an application capability, not a host sandbox. The setup boundary comes from the request contract, exact command list, credential boundary, project baseline, and post-turn inspection.
 
 ## Contract
 
@@ -96,7 +96,7 @@ Forbidden examples:
 
 ## Bypass lifecycle
 
-After writing the ignored mailbox request, capture the clean baseline and enable Bypass through the guarded action:
+After writing the ignored mailbox request, capture the current baseline and enable Bypass through the guarded action:
 
 ```powershell
 pwsh -NoProfile -File .\skills\chat-mode\scripts\claude-desktop-uia.ps1 `
@@ -119,7 +119,7 @@ If Claude must be closed or restarted, Codex or the user performs that step afte
 
 Before sending, record:
 
-- clean `git status --porcelain=v1 --untracked-files=all`;
+- `git status --porcelain=v1 --untracked-files=all`;
 - branch and `HEAD`;
 - upstream ref and remote-tracking commit when configured;
 - exact setup commands;
@@ -130,7 +130,7 @@ Before sending, record:
 
 After every Claude turn, verify:
 
-- tracked and untracked project status is still clean;
+- tracked and untracked project status matches the recorded baseline except for ignored `.chat-mode/` orchestration files;
 - branch and `HEAD` are unchanged;
 - no commit was created;
 - upstream state is unchanged;
@@ -146,7 +146,7 @@ Ignored `.chat-mode/` request and transcript files are orchestration state, not 
 
 Stop and restore Manual when:
 
-- the worktree is not clean at baseline;
+- the baseline cannot be recorded or compared;
 - Claude creates, modifies, deletes, renames, stages, or commits a project file;
 - Claude runs an undeclared, destructive, deployment, Git-mutating, or broad shell command;
 - Claude requests or exposes credentials, remote access URLs, API keys, passwords, tokens, private keys, or one-time codes;

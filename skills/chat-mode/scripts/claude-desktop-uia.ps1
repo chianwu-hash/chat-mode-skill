@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('List', 'Expand', 'Select', 'Invoke', 'SendPrompt', 'ApprovePrompt', 'ApproveWorkspaceTrust', 'EnableBypass', 'DisableBypass', 'ReadDocument', 'WaitText')]
+    [ValidateSet('List', 'Expand', 'Select', 'Invoke', 'SendPrompt', 'ClearOverlay', 'Diagnose', 'ApprovePrompt', 'ApproveWorkspaceTrust', 'EnableBypass', 'DisableBypass', 'ReadDocument', 'WaitText')]
     [string]$Action = 'List',
 
     [string]$ProcessName = 'claude',
@@ -21,7 +21,9 @@ param(
 
     [string]$TextRegex = '',
 
-    [string]$BypassContract = ''
+    [string]$BypassContract = '',
+
+    [string]$ExpectedWorkspace = ''
 )
 
 Set-StrictMode -Version Latest
@@ -34,6 +36,7 @@ if (-not $IsWindows) {
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName WindowsBase
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -302,22 +305,118 @@ function Get-FocusedSummary {
     }
 }
 
-function Test-IsOverlayFocus {
-    param([PSCustomObject]$Focused)
+function Get-ClaudeProcessIds {
+    return @(Get-Process -Name $ProcessName -ErrorAction Stop | ForEach-Object { $_.Id })
+}
 
-    if ([string]::IsNullOrWhiteSpace($Focused.ControlType)) {
+function Join-RuntimeId {
+    param([System.Windows.Automation.AutomationElement]$Element)
+
+    try {
+        return ($Element.GetRuntimeId() -join '.')
+    }
+    catch {
+        return ''
+    }
+}
+
+function Test-SameElement {
+    param(
+        [System.Windows.Automation.AutomationElement]$Left,
+        [System.Windows.Automation.AutomationElement]$Right
+    )
+
+    if ($null -eq $Left -or $null -eq $Right) {
         return $false
     }
 
-    if ($Focused.ControlType -in @(
-            'ControlType.Menu',
-            'ControlType.MenuItem',
-            'ControlType.ComboBox'
-        )) {
+    $leftId = Join-RuntimeId -Element $Left
+    $rightId = Join-RuntimeId -Element $Right
+    return -not [string]::IsNullOrWhiteSpace($leftId) -and $leftId -eq $rightId
+}
+
+function Test-IsDescendantOrSelf {
+    param(
+        [System.Windows.Automation.AutomationElement]$Element,
+        [System.Windows.Automation.AutomationElement]$Ancestor
+    )
+
+    if (Test-SameElement -Left $Element -Right $Ancestor) {
         return $true
     }
 
+    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $current = $Element
+    while ($null -ne $current) {
+        if (Test-SameElement -Left $current -Right $Ancestor) {
+            return $true
+        }
+        $current = $walker.GetParent($current)
+    }
+
     return $false
+}
+
+function Get-ClaudeDesktopMatches {
+    param(
+        [string]$Pattern,
+        [string]$ExpectedType = 'Any'
+    )
+
+    $desktopRoot = [System.Windows.Automation.AutomationElement]::RootElement
+    return @(Get-MatchingElements `
+            -Root $desktopRoot `
+            -Pattern $Pattern `
+            -ExpectedType $ExpectedType `
+            -ProcessId (Get-ClaudeProcessIds))
+}
+
+function Get-ExpandedControls {
+    param([System.Windows.Automation.AutomationElement]$Root)
+
+    $all = $Root.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    )
+
+    $result = [System.Collections.Generic.List[object]]::new()
+    for ($index = 0; $index -lt $all.Count; $index++) {
+        $element = $all.Item($index)
+        $expandPattern = $null
+        if ($element.TryGetCurrentPattern(
+                [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
+                [ref]$expandPattern
+            ) -and
+            $expandPattern.Current.ExpandCollapseState -ne
+            [System.Windows.Automation.ExpandCollapseState]::Collapsed -and
+            -not $element.Current.IsOffscreen
+        ) {
+            $result.Add($element)
+        }
+    }
+
+    return $result.ToArray()
+}
+
+function Get-VisibleSendButton {
+    param([System.Windows.Automation.AutomationElement]$Root)
+
+    $sendButtons = @(Get-MatchingElements `
+            -Root $Root `
+            -Pattern '^Send(?:\s+\d+)?$' `
+            -ExpectedType 'Button')
+    $visible = @($sendButtons | Where-Object {
+            -not $_.Current.IsOffscreen
+        })
+    if ($visible.Count -eq 0) {
+        return $null
+    }
+    if ($visible.Count -gt 1) {
+        $names = ($visible | ForEach-Object { $_.Current.Name }) -join '; '
+        throw "Expected one visible Send button, found $($visible.Count): $names"
+    }
+
+    return $visible[0]
 }
 
 function Test-VisibleStop {
@@ -333,39 +432,332 @@ function Test-VisibleStop {
         }).Count -gt 0
 }
 
+function Test-SendOccluded {
+    param([System.Windows.Automation.AutomationElement]$Send)
+
+    if ($null -eq $Send) {
+        return $true
+    }
+
+    $rect = $Send.Current.BoundingRectangle
+    if ($rect.IsEmpty -or $rect.Width -le 0 -or $rect.Height -le 0) {
+        return $true
+    }
+
+    $point = [System.Windows.Point]::new(
+        $rect.Left + ($rect.Width / 2),
+        $rect.Top + ($rect.Height / 2)
+    )
+    $hit = [System.Windows.Automation.AutomationElement]::FromPoint($point)
+    if ($null -eq $hit) {
+        return $true
+    }
+
+    return -not (Test-IsDescendantOrSelf -Element $hit -Ancestor $Send)
+}
+
+function Get-ComposerElement {
+    param([System.Windows.Automation.AutomationElement]$Root)
+
+    $all = $Root.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    )
+
+    $candidates = [System.Collections.Generic.List[object]]::new()
+    for ($index = 0; $index -lt $all.Count; $index++) {
+        $element = $all.Item($index)
+        if ($element.Current.IsOffscreen -or -not $element.Current.IsEnabled) {
+            continue
+        }
+        $valuePattern = $null
+        $textPattern = $null
+        if (
+            $element.TryGetCurrentPattern(
+                [System.Windows.Automation.ValuePattern]::Pattern,
+                [ref]$valuePattern
+            ) -or
+            $element.TryGetCurrentPattern(
+                [System.Windows.Automation.TextPattern]::Pattern,
+                [ref]$textPattern
+            )
+        ) {
+            $rect = $element.Current.BoundingRectangle
+            if (-not $rect.IsEmpty -and $rect.Width -gt 100 -and $rect.Height -gt 10) {
+                $candidates.Add($element)
+            }
+        }
+    }
+
+    if ($candidates.Count -eq 0) {
+        return $null
+    }
+
+    return @($candidates | Sort-Object {
+            $_.Current.BoundingRectangle.Top
+        } -Descending)[0]
+}
+
+function Get-ComposerText {
+    param([System.Windows.Automation.AutomationElement]$Composer)
+
+    if ($null -eq $Composer) {
+        return ''
+    }
+
+    $valuePattern = $null
+    if ($Composer.TryGetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern,
+            [ref]$valuePattern
+        )) {
+        return [string]$valuePattern.Current.Value
+    }
+
+    $textPattern = $null
+    if ($Composer.TryGetCurrentPattern(
+            [System.Windows.Automation.TextPattern]::Pattern,
+            [ref]$textPattern
+        )) {
+        return $textPattern.DocumentRange.GetText(-1)
+    }
+
+    return ''
+}
+
+function Get-MarkerCount {
+    param(
+        [System.Windows.Automation.AutomationElement]$Root,
+        [string]$Pattern
+    )
+
+    $document = Get-DocumentText -Root $Root
+    return [regex]::Matches($document, $Pattern).Count
+}
+
+function Get-DialogState {
+    $trust = @(Get-ClaudeDesktopMatches -Pattern '(?i)^Trust this workspace\?$')
+    if ($trust.Count -gt 0) {
+        return [PSCustomObject]@{
+            Kind        = 'dialog'
+            Name        = 'Trust this workspace?'
+            ControlType = 'Dialog'
+            Source      = 'desktop'
+        }
+    }
+
+    $allow = @(Get-ClaudeDesktopMatches -Pattern '^Allow once(?:\s+\d+)?$' -ExpectedType 'Button')
+    $deny = @(Get-ClaudeDesktopMatches -Pattern '^Deny(?:\s+\d+)?$' -ExpectedType 'Button')
+    if ($allow.Count -gt 0 -or $deny.Count -gt 0) {
+        return [PSCustomObject]@{
+            Kind        = 'dialog'
+            Name        = 'Allow once / Deny'
+            ControlType = 'Dialog'
+            Source      = 'desktop'
+        }
+    }
+
+    $bypass = @(Get-ClaudeDesktopMatches -Pattern '^Bypass all permissions\?$')
+    if ($bypass.Count -gt 0) {
+        return [PSCustomObject]@{
+            Kind        = 'dialog'
+            Name        = 'Bypass all permissions?'
+            ControlType = 'Dialog'
+            Source      = 'desktop'
+        }
+    }
+
+    return $null
+}
+
+function Get-OverlayState {
+    param([System.Windows.Automation.AutomationElement]$Root)
+
+    $dialog = Get-DialogState
+    if ($null -ne $dialog) {
+        return $dialog
+    }
+
+    $expanded = @(Get-ExpandedControls -Root $Root)
+    if ($expanded.Count -gt 0) {
+        $first = $expanded[0]
+        $name = $first.Current.Name
+        $kind = 'workspace'
+        if ($name -match '^(?:Manual|Accept edits|Bypass permissions)$') {
+            $kind = 'mode-selector'
+        }
+        elseif ($name -match '^(?:Opus|Sonnet|Haiku|Fable)\b') {
+            $kind = 'model-selector'
+        }
+
+        return [PSCustomObject]@{
+            Kind        = $kind
+            Name        = $name
+            ControlType = $first.Current.ControlType.ProgrammaticName
+            Source      = 'expanded'
+            Element     = $first
+        }
+    }
+
+    $menus = @(Get-ClaudeDesktopMatches -Pattern '.+' | Where-Object {
+            -not $_.Current.IsOffscreen -and
+            $_.Current.ControlType.ProgrammaticName -in @(
+                'ControlType.Menu',
+                'ControlType.MenuItem',
+                'ControlType.ComboBox'
+            )
+        })
+    if ($menus.Count -gt 0) {
+        $first = $menus[0]
+        return [PSCustomObject]@{
+            Kind        = 'workspace'
+            Name        = $first.Current.Name
+            ControlType = $first.Current.ControlType.ProgrammaticName
+            Source      = 'popup'
+            Element     = $first
+        }
+    }
+
+    $send = Get-VisibleSendButton -Root $Root
+    if ($null -ne $send -and (Test-SendOccluded -Send $send)) {
+        return [PSCustomObject]@{
+            Kind        = 'unknown'
+            Name        = 'Send is occluded'
+            ControlType = 'HitTest'
+            Source      = 'from-point'
+            Element     = $send
+        }
+    }
+
+    return [PSCustomObject]@{
+        Kind        = 'none'
+        Name        = ''
+        ControlType = ''
+        Source      = ''
+    }
+}
+
+function Clear-BlockingOverlay {
+    param(
+        [System.Windows.Automation.AutomationElement]$Root,
+        [string]$WorkspaceName = ''
+    )
+
+    $overlay = Get-OverlayState -Root $Root
+    if ($overlay.Kind -eq 'none') {
+        Write-Output 'overlay: none'
+        return $true
+    }
+    if ($overlay.Kind -eq 'dialog') {
+        throw "send_blocked_by_dialog: $($overlay.Name)"
+    }
+
+    if ($overlay.Source -eq 'expanded' -and $null -ne $overlay.Element) {
+        Reset-CollapsedElement -Element $overlay.Element
+        Start-Sleep -Milliseconds 250
+        $after = Get-OverlayState -Root $Root
+        if ($after.Kind -eq 'none') {
+            Write-Output "overlay cleared: collapsed $($overlay.Name)"
+            return $true
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($WorkspaceName) -and $overlay.Kind -eq 'workspace') {
+        $workspacePattern = [regex]::Escape($WorkspaceName)
+        $selected = @(Get-ClaudeDesktopMatches -Pattern $workspacePattern | Where-Object {
+                $selectionItemPattern = $null
+                $_.TryGetCurrentPattern(
+                    [System.Windows.Automation.SelectionItemPattern]::Pattern,
+                    [ref]$selectionItemPattern
+                ) -and
+                $selectionItemPattern.Current.IsSelected
+            })
+        if ($selected.Count -eq 1) {
+            Select-Element -Element $selected[0]
+            Start-Sleep -Milliseconds 250
+            $after = Get-OverlayState -Root $Root
+            if ($after.Kind -eq 'none') {
+                Write-Output "overlay cleared: re-selected $($selected[0].Current.Name)"
+                return $true
+            }
+        }
+    }
+
+    $windowHandle = [IntPtr]$Root.Current.NativeWindowHandle
+    $composer = Get-ComposerElement -Root $Root
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    $focusIsComposer = $null -ne $focused -and $null -ne $composer -and
+        (Test-SameElement -Left $focused -Right $composer)
+    if (
+        [ChatModeWindowGuard]::GetForegroundWindow() -eq $windowHandle -and
+        -not $focusIsComposer
+    ) {
+        [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+        Start-Sleep -Milliseconds 300
+        $after = Get-OverlayState -Root $Root
+        if ($after.Kind -eq 'none') {
+            Write-Output 'overlay cleared: Escape'
+            return $true
+        }
+    }
+
+    $after = Get-OverlayState -Root $Root
+    throw "send_blocked_by_overlay:$($after.Kind): $($after.ControlType) '$($after.Name)' via $($after.Source)"
+}
+
 function Test-SendSubmitted {
     param(
         [System.Windows.Automation.AutomationElement]$Root,
+        [string]$ExpectedTextRegex,
+        [int]$BaselineMarkerCount,
+        [string]$BaselineComposerText = '',
         [int]$Seconds = 8
     )
 
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds($Seconds)
     do {
-        if (Test-VisibleStop -Root $Root) {
-            return $true
+        $currentMarkerCount = Get-MarkerCount -Root $Root -Pattern $ExpectedTextRegex
+        if ($currentMarkerCount -gt $BaselineMarkerCount) {
+            return [PSCustomObject]@{
+                Submitted = $true
+                Evidence  = "marker-count $BaselineMarkerCount->$currentMarkerCount"
+            }
         }
 
-        $sendButtons = @(Get-MatchingElements `
-                -Root $Root `
-                -Pattern '^Send$' `
-                -ExpectedType 'Button')
+        if (Test-VisibleStop -Root $Root) {
+            return [PSCustomObject]@{
+                Submitted = $true
+                Evidence  = 'visible Stop'
+            }
+        }
+
+        $composer = Get-ComposerElement -Root $Root
+        $composerText = Get-ComposerText -Composer $composer
+        $send = Get-VisibleSendButton -Root $Root
         if (
-            $sendButtons.Count -eq 1 -and
-            (-not $sendButtons[0].Current.IsEnabled)
+            -not [string]::IsNullOrWhiteSpace($BaselineComposerText) -and
+            [string]::IsNullOrWhiteSpace($composerText) -and
+            ($null -eq $send -or -not $send.Current.IsEnabled)
         ) {
-            return $true
+            return [PSCustomObject]@{
+                Submitted = $true
+                Evidence  = 'composer-empty send-disabled-or-absent'
+            }
         }
 
         Start-Sleep -Milliseconds 500
     } while ([DateTimeOffset]::UtcNow -lt $deadline)
 
-    return $false
+    return [PSCustomObject]@{
+        Submitted = $false
+        Evidence  = 'no post-send evidence'
+    }
 }
 
 function Invoke-GuardedSendPrompt {
     param(
         [System.Windows.Automation.AutomationElement]$Root,
-        [string]$ExpectedTextRegex
+        [string]$ExpectedTextRegex,
+        [string]$WorkspaceName = ''
     )
 
     Assert-SpecificTextRegex -Pattern $ExpectedTextRegex
@@ -381,26 +773,41 @@ function Invoke-GuardedSendPrompt {
         return
     }
 
-    $documentBefore = Get-DocumentText -Root $Root
-    if (-not [regex]::IsMatch($documentBefore, $ExpectedTextRegex)) {
-        throw 'Expected composer/request text was not visible before SendPrompt.'
+    $baselineMarkerCount = Get-MarkerCount -Root $Root -Pattern $ExpectedTextRegex
+    if ($baselineMarkerCount -lt 1) {
+        throw 'Expected request text or completion marker was not visible before SendPrompt.'
     }
 
-    $focused = Get-FocusedSummary
-    if ($isForeground -and (Test-IsOverlayFocus -Focused $focused)) {
-        [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
-        Start-Sleep -Milliseconds 350
-        $focused = Get-FocusedSummary
-        if (Test-IsOverlayFocus -Focused $focused) {
-            throw "send_blocked_by_overlay: focus remains $($focused.ControlType) '$($focused.Name)' after Escape."
-        }
+    $composer = Get-ComposerElement -Root $Root
+    $baselineComposerText = Get-ComposerText -Composer $composer
+
+    $overlay = Get-OverlayState -Root $Root
+    if ($overlay.Kind -ne 'none') {
+        $null = Clear-BlockingOverlay -Root $Root -WorkspaceName $WorkspaceName
+        $baselineMarkerCount = Get-MarkerCount -Root $Root -Pattern $ExpectedTextRegex
     }
 
-    $send = Get-UniqueElement -Root $Root -Pattern '^Send$' -ExpectedType 'Button'
+    $send = Get-VisibleSendButton -Root $Root
+    if ($null -eq $send) {
+        throw 'send_not_submitted: no visible Send button was available.'
+    }
+    if (-not $send.Current.IsEnabled) {
+        throw "send_not_submitted: Send button '$($send.Current.Name)' is disabled."
+    }
+    if (Test-SendOccluded -Send $send) {
+        $overlay = Get-OverlayState -Root $Root
+        throw "send_blocked_by_overlay:$($overlay.Kind): Send is occluded by $($overlay.ControlType) '$($overlay.Name)' via $($overlay.Source)."
+    }
+
     $sendName = $send.Current.Name
     Invoke-Element -Element $send
-    if (Test-SendSubmitted -Root $Root) {
-        Write-Output "submitted: InvokePattern $sendName"
+    $submission = Test-SendSubmitted `
+        -Root $Root `
+        -ExpectedTextRegex $ExpectedTextRegex `
+        -BaselineMarkerCount $baselineMarkerCount `
+        -BaselineComposerText $baselineComposerText
+    if ($submission.Submitted) {
+        Write-Output "submitted: InvokePattern $sendName ($($submission.Evidence))"
         return
     }
 
@@ -408,27 +815,14 @@ function Invoke-GuardedSendPrompt {
         throw 'send_not_submitted: InvokePattern did not submit and keyboard fallback requires Claude to be foreground.'
     }
 
-    $manual = $null
-    try {
-        $manual = Get-UniqueElement `
-            -Root $Root `
-            -Pattern '^(?:Manual|Accept edits|Bypass permissions)$' `
-            -ExpectedType 'Button'
-    }
-    catch {
-        throw "send_not_submitted: InvokePattern did not submit and no mode button was available for keyboard fallback. $($_.Exception.Message)"
-    }
-
-    $manual.SetFocus()
+    $baselineMarkerCount = Get-MarkerCount -Root $Root -Pattern $ExpectedTextRegex
+    $send.SetFocus()
     Start-Sleep -Milliseconds 150
-    [System.Windows.Forms.SendKeys]::SendWait('+{TAB}')
-    Start-Sleep -Milliseconds 200
     $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
     if (
         $null -eq $focused -or
         $focused.Current.ProcessId -ne $send.Current.ProcessId -or
-        $focused.Current.Name -ne 'Send' -or
-        $focused.Current.ControlType -ne [System.Windows.Automation.ControlType]::Button
+        -not (Test-SameElement -Left $focused -Right $send)
     ) {
         $summary = Get-FocusedSummary
         throw "send_not_submitted: Send focus fallback failed; focus is $($summary.ControlType) '$($summary.Name)'."
@@ -438,12 +832,22 @@ function Invoke-GuardedSendPrompt {
     }
 
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
-    if (Test-SendSubmitted -Root $Root) {
-        Write-Output 'submitted: focused Send + Enter'
+    $submission = Test-SendSubmitted `
+        -Root $Root `
+        -ExpectedTextRegex $ExpectedTextRegex `
+        -BaselineMarkerCount $baselineMarkerCount `
+        -BaselineComposerText $baselineComposerText
+    if ($submission.Submitted) {
+        Write-Output "submitted: focused Send + Enter ($($submission.Evidence))"
         return
     }
 
-    throw 'send_not_submitted: composer still appears unsent after InvokePattern and focused Send + Enter.'
+    $composerAfter = Get-ComposerText -Composer (Get-ComposerElement -Root $Root)
+    if ($composerAfter -eq ($baselineComposerText + "`r`n") -or $composerAfter -eq ($baselineComposerText + "`n")) {
+        throw 'keyboard_inserts_newline: Enter changed the composer text but did not submit.'
+    }
+
+    throw "send_not_submitted: composer still appears unsent after InvokePattern and focused Send + Enter ($($submission.Evidence))."
 }
 
 function Get-AncestorWindow {
@@ -533,7 +937,39 @@ switch ($Action) {
             throw '-TextRegex is required for SendPrompt and should match the expected request text or completion marker.'
         }
 
-        Invoke-GuardedSendPrompt -Root $root -ExpectedTextRegex $TextRegex
+        Invoke-GuardedSendPrompt `
+            -Root $root `
+            -ExpectedTextRegex $TextRegex `
+            -WorkspaceName $ExpectedWorkspace
+        break
+    }
+
+    'ClearOverlay' {
+        Clear-BlockingOverlay -Root $root -WorkspaceName $ExpectedWorkspace
+        break
+    }
+
+    'Diagnose' {
+        $send = Get-VisibleSendButton -Root $root
+        $composer = Get-ComposerElement -Root $root
+        $composerText = Get-ComposerText -Composer $composer
+        $overlay = Get-OverlayState -Root $root
+        $focused = Get-FocusedSummary
+        [PSCustomObject]@{
+            OverlayKind        = $overlay.Kind
+            OverlayName        = $overlay.Name
+            OverlayControlType = $overlay.ControlType
+            OverlaySource      = $overlay.Source
+            SendVisible        = $null -ne $send
+            SendEnabled        = $null -ne $send -and $send.Current.IsEnabled
+            SendOccluded       = $null -eq $send -or (Test-SendOccluded -Send $send)
+            StopVisible        = Test-VisibleStop -Root $root
+            ComposerFound      = $null -ne $composer
+            ComposerLength     = $composerText.Length
+            FocusName          = $focused.Name
+            FocusControlType   = $focused.ControlType
+            FocusProcessId     = $focused.ProcessId
+        }
         break
     }
 

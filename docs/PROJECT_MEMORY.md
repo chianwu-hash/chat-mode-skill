@@ -41,7 +41,7 @@ Decision:
 - `docs/protocol.md` is only a pointer to the canonical reference files.
 - Repository memory docs summarize decisions but must not override the skill or references.
 
-### Review mode defaults to guarded read-only Bypass
+### Review mode always defaults to guarded read-only Bypass
 
 Status: active
 Scope: `review` / discussion sessions
@@ -49,17 +49,30 @@ Primary source: `skills/chat-mode/references/review-bypass-readonly.md`
 
 Decision:
 
-- Clean review sessions default Claude Desktop to `Bypass permissions` under a `review-readonly` contract.
+- Review sessions default Claude Desktop to `Bypass permissions` under a `review-readonly` contract, even when the repository already has dirty files.
 - Claude may read, list, search, and run only declared read-only inspection commands.
 - Codex remains the sole writer.
-- The worktree must be clean, on a named branch, and have a baseline commit before enabling Bypass.
-- Successful clean review leaves Claude in Bypass for later reuse.
+- Codex records branch, HEAD, upstream state when available, and dirty status before sending.
+- Successful review leaves Claude in Bypass for later reuse when status has no new mutation relative to the recorded baseline.
 - Failure, ambiguity, mutation, or explicit user request restores `Manual`.
 
 Reason:
 
 - Bypass removes repeated permission prompts for routine review without granting task authority.
-- Read-only authority is contractual and verified by clean Git baseline / post-turn inspection; Bypass is not an OS sandbox.
+- Read-only authority is contractual and verified by baseline / post-turn inspection; Bypass is not an OS sandbox.
+
+### Send overlay detection is state-based, not focus-based
+
+Status: active
+Scope: `SendPrompt`, `Diagnose`, `ClearOverlay`
+Primary source: `skills/chat-mode/references/windows-uia.md`
+
+Decision:
+
+- `SendPrompt` must not rely on focused control type as the primary proof that an overlay is open or closed.
+- Detect blocking state with expanded controls, desktop-root Claude popups, trust/permission dialogs, composer state, marker-count baselines, and `FromPoint` hit-testing at the center of `Send`.
+- Workspace dropdowns should be cleared with `ExpandCollapsePattern.Collapse()` first, then by re-selecting the already-selected expected workspace row when safe, then guarded `Escape` only when focus is provably not the composer.
+- A trust, permission, or Bypass dialog is `send_blocked_by_dialog` and must be handled by contract-specific approval, not by the Send ladder.
 
 ### Host setup has its own guarded Bypass contract
 
@@ -145,6 +158,6 @@ Decision:
 
 - Do not treat Bypass as sandboxing or as permission to exceed the recorded contract.
 - Do not approve broad prompts such as `.*`; derive prompt regex from the exact contract.
-- Do not run implementation or direct-main workflows from a dirty, detached, unversioned, or unusually sensitive worktree.
+- Do not treat dirty status alone as a reason to avoid Bypass for read-only review; record the baseline and reject new mutation.
 - Do not delete `.chat-mode-worktrees` or branches without explicit cleanup authorization.
 - When protocol behavior changes, update `skills/chat-mode/SKILL.md`, relevant references, helper scripts, AGENTS / CLAUDE if needed, README, tests, and this memory file together.

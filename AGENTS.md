@@ -20,15 +20,15 @@ Before changing this repository:
 
 - Use the filesystem mailbox plus Windows UI Automation workflow documented by the skill.
 - Do not recreate or call the retired root `tools/` runner.
-- Keep Claude read-only unless the user explicitly authorizes an implementation mode.
+- Keep Claude contractually read-only unless the user explicitly authorizes implementation or host setup.
 - For isolated implementation, require a clean main worktree and use the bundled worktree helper.
 - For explicit non-isolated access, require a clean main worktree and use `chat-mode-direct-main.ps1`; Claude becomes the exclusive writer until inspected handback.
 - Treat the user's task as delegated authority for necessary project-local reads, in-scope writes, and declared validation commands.
 - Record the exact worktree, branch, base commit, `write_scope`, and authorized actions and commands; set Claude to `Accept edits` without a second confirmation when they remain inside the original request.
 - Let Codex verify and approve exact contract-matching prompts through guarded UIA actions. Escalate scope expansion, destructive actions, credentials, production or deployment access, and unexpected network access.
-- Default clean review sessions to `Bypass permissions` under the guarded `review-readonly` contract; keep the mailbox authority read-only and reject any repository mutation.
+- Default review sessions to `Bypass permissions` under the guarded `review-readonly` contract, regardless of dirty Git status; keep the mailbox authority read-only and reject any new repository mutation relative to the recorded baseline.
 - Enable writable `Bypass permissions` only for explicit `direct-main-exclusive` authority and only through the guarded warning-confirmation action.
-- After a successful clean `review-readonly` session, leave Claude in `Bypass permissions` so later reviews can reuse it without another mode transition.
+- After a successful `review-readonly` session with no new mutation relative to baseline, leave Claude in `Bypass permissions` so later reviews can reuse it without another mode transition.
 - Restore Claude to `Manual` after implementation or host-setup handback, on review failure or ambiguity, or when the user explicitly requests `Manual`.
 - Never let Codex and Claude edit tracked files in the same worktree concurrently.
 - Enforce the declared `write_scope` before integrating Claude's changes.

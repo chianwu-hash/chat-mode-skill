@@ -9,7 +9,7 @@ The current design uses:
 - accessible document text instead of screenshots or OCR for responses;
 - sibling Git worktrees when Claude is explicitly asked to implement changes;
 - exclusive main-worktree handoff when the user explicitly requests equal non-isolated project access;
-- guarded Bypass for prompt-free, contractually read-only review on a clean Git baseline;
+- guarded Bypass for prompt-free, contractually read-only review, even when the repository already has dirty files;
 - guarded Bypass for exact, user-authorized host setup without project writes or credential disclosure;
 - Codex-managed approval for prompts that exactly match the delegated task contract.
 
@@ -73,7 +73,7 @@ Primary UIA actions do not move the mouse or bring Claude to the foreground. A C
 
 | Mode | Claude access | Writer ownership | Permission mode |
 | --- | --- | --- | --- |
-| `review` | Read-only main worktree | Codex | Guarded `Bypass permissions` by default; `Manual` fallback |
+| `review` | Read-only main worktree | Codex | Guarded `Bypass permissions` by default |
 | `host-setup-delegated` | Exact host setup commands and non-secret config only | Codex owns project files; Claude owns declared setup steps | Guarded `Bypass permissions` |
 | `isolated-implementer` | Dedicated sibling worktree | Claude owns the isolated tree | `Accept edits` or guarded prompts |
 | `direct-main-exclusive` | Current main worktree | Claude temporarily owns main; Codex freezes | Explicit guarded `Bypass permissions` |
@@ -92,11 +92,11 @@ After Claude stops, Codex inspects the complete diff, checks scope, reproduces t
 
 For review and discussion, chat-mode defaults Claude Desktop to guarded Bypass under a `review-readonly` contract. This removes routine prompts while Claude reads, lists, searches, and inspects the project. Codex remains the sole writer, and the request forbids edits, Git mutation, network access, credentials, deployment, destructive commands, and external paths.
 
-Review Bypass requires a clean Git worktree, named branch, and baseline commit. After a successful clean review, chat-mode leaves Claude in Bypass so the next review can reuse the already-enabled state. It restores `Manual` on failure or ambiguity and rejects the turn if project status, branch, HEAD, commits, or upstream state changes. Dirty, unversioned, detached, or unusually sensitive workspaces fall back to `Manual`.
+Review Bypass is the default even when the repository already has dirty files. Codex records branch, HEAD, upstream state when available, and the current status before sending. After a successful review with no new mutation relative to that baseline, chat-mode leaves Claude in Bypass so the next review can reuse the already-enabled state. It restores `Manual` on failure or ambiguity and rejects the turn if branch, HEAD, commits, upstream state, or project status changes beyond the recorded baseline.
 
 ## Host setup delegation
 
-When the user explicitly asks Claude to install a plugin or configure a local tool, chat-mode may use `host-setup-delegated`. This keeps project files read-only while allowing exact declared setup commands, declared non-secret config writes, and declared network hosts. It is useful for tasks such as installing a Claude Code plugin after Codex has recorded the setup scope and smoke tests.
+When the user explicitly asks Claude to install a plugin or configure a local tool, chat-mode may use `host-setup-delegated`. This keeps project files read-only while allowing exact declared setup commands, declared non-secret config writes, and declared network hosts. It is useful for tasks such as installing a Claude Code plugin after Codex has recorded the setup scope and smoke tests. This is the writable setup path; ordinary discussion and review remain read-only even in Bypass.
 
 Secrets stay outside chat-mode. Claude must not ask for, print, store, or write Access Anywhere URLs, API keys, passwords, tokens, private keys, or one-time codes. If secret entry is required, the user handles it directly in the local UI or command prompt, and Claude resumes only for non-secret verification. Codex restores `Manual`, verifies the repository stayed clean, and checks that Claude did not exceed the setup contract.
 
@@ -117,7 +117,7 @@ Equal access means equivalent authority under the user's task, not concurrent ed
 - Direct main implementation transfers exclusive writer ownership serially; Codex and Claude never write the same worktree concurrently.
 - `Accept edits` is session convenience, not path-level sandboxing; out-of-scope changes are rejected during inspection.
 - Guarded UIA approval requires one uniquely matching prompt control plus visible, enabled `Allow once` and `Deny` controls; ambiguity fails closed.
-- `Bypass permissions` is the default Claude Desktop UI mode for clean read-only review, but it does not expand the read-only task contract.
+- `Bypass permissions` is the default Claude Desktop UI mode for read-only review, but it does not expand the read-only task contract.
 - Writable Bypass still requires an explicit direct-main handoff and remains bounded by the task contract.
 - Sessions have turn, time, and response-size bounds.
 - `.chat-mode/STOP` aborts the session.
@@ -132,4 +132,4 @@ The first end-to-end background UIA review is recorded in [docs/smoke-test-2026-
 
 ## Status
 
-Experimental. The 2026-08-08 tests validated prompt-free read-only review, isolated Claude writes, guarded workspace trust, Codex-controlled `Allow once`, and an explicit non-isolated `Bypass permissions` handoff. The original read-only Bypass test completed without permission prompts or commands, restored `Manual`, and left status, branch, HEAD, and commits unchanged; the persistence regression then verified that a successful clean review can leave Bypass enabled and reuse it idempotently. The direct-main test passed exact-content, write-scope, branch, HEAD, upstream, and diff-check inspection.
+Experimental. The 2026-08-08 tests validated prompt-free read-only review, isolated Claude writes, guarded workspace trust, Codex-controlled `Allow once`, and an explicit non-isolated `Bypass permissions` handoff. The original read-only Bypass test completed without permission prompts or commands, restored `Manual`, and left status, branch, HEAD, and commits unchanged; the persistence regression then verified that a successful review can leave Bypass enabled and reuse it idempotently. The direct-main test passed exact-content, write-scope, branch, HEAD, upstream, and diff-check inspection.

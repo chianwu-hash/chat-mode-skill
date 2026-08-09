@@ -68,10 +68,10 @@ Before commit:
 
 ### Review
 
-- Require clean baseline before guarded Bypass.
+- Record branch, HEAD, upstream state when available, and dirty status before guarded Bypass.
 - Keep contract read-only.
-- Leave Bypass enabled only after a successful clean review.
-- Restore Manual on failure, ambiguity, mutation, or explicit user request.
+- Leave Bypass enabled after a successful review with no new mutation relative to baseline.
+- Restore Manual on failure, ambiguity, new mutation relative to baseline, or explicit user request.
 
 ### Host setup
 

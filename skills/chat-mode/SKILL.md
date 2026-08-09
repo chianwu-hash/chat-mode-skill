@@ -12,7 +12,7 @@ Run Codex as the orchestrator and Claude Desktop Code as a bounded reviewer, iso
 1. Keep Codex as the only orchestrator. Claude must not invoke Codex or start a nested chat-mode loop.
 2. Use files for durable requests and transcripts. Use UIA as the control plane and as the tested response-reading path.
 3. Treat the user's task as delegated authority for necessary project-local reads, in-scope writes, and declared validation. Let Codex verify and approve matching Claude prompts; ask the user only when authority would expand or risk materially changes.
-4. For review or discussion, default Claude Desktop to guarded `Bypass permissions` under a `review-readonly` contract. Keep Codex as the sole writer and explicitly forbid edits, commits, pushes, destructive commands, network access, credentials, deployment, and external paths.
+4. Default Claude Desktop to guarded `Bypass permissions` for chat-mode turns, including dirty repositories, but make the mailbox contract the authority boundary. For review or discussion, use `review-readonly`: keep Codex as the sole writer and explicitly forbid edits, commits, pushes, destructive commands, network access, credentials, deployment, and external paths. For tool installation or machine setup, use `host-setup-delegated` with exact declared setup commands and non-secret config writes.
 5. Bound every session by turns, time, and response size. Default to 3 turns and a 5-minute limit per Claude turn.
 6. Use one writer per working tree. In review mode, Codex is the sole project writer. In implementation modes, hand the selected working tree exclusively to Claude and freeze Codex writes until handback.
 7. Require a Git repository, clean selected worktree, baseline commit and branch, explicit `write_scope`, and authorized action and command sets before implementation.
@@ -40,15 +40,15 @@ Confirm or infer:
 - actions and commands delegated by the user's request;
 - completion marker unique to the turn.
 
-Default to `review` with a read-only mailbox contract and the guarded `review-readonly` Bypass profile. Do not confuse Claude Desktop's permission UI with task authority, and do not expand authority merely to keep the loop moving.
+Default to `review` with a read-only mailbox contract and the guarded `review-readonly` Bypass profile, regardless of whether the repository is clean or dirty. Do not confuse Claude Desktop's permission UI with task authority, and do not expand authority merely to keep the loop moving.
 
 Use `host-setup-delegated` only for user-requested host setup such as installing a Claude plugin or configuring a local tool. This mode may authorize exact setup commands and non-secret config writes, but it must not authorize project edits, Git mutation, deployment, destructive commands, or credential disclosure.
 
 ### 2. Select the working tree
 
-For review mode, use the main repository and keep Claude contractually read-only. Require a clean Git baseline for the default Bypass profile so any mutation is detectable. Fall back to `Manual` review when the worktree is dirty, unversioned, detached, or unusually sensitive.
+For review mode, use the main repository and keep Claude contractually read-only. Capture the current Git baseline when available; if the worktree is dirty, record the dirty status in the request and in the handback check instead of falling back to `Manual`. Use `Manual` only when the user explicitly requests per-action approval or the workspace cannot be identified reliably.
 
-For host-setup-delegated mode, use the repository only as an orchestration anchor and keep project files read-only. Require a clean Git baseline so project mutation is detectable. Record exact host setup targets, commands, non-secret config paths, restart authority, network hosts, and credential boundaries. Keep Access Anywhere URLs, API keys, passwords, tokens, and private keys out of all chat-mode artifacts.
+For host-setup-delegated mode, use the repository only as an orchestration anchor and keep project files read-only. Record the current Git baseline so project mutation is detectable, even when unrelated dirty files already exist. Record exact host setup targets, commands, non-secret config paths, restart authority, network hosts, and credential boundaries. Keep Access Anywhere URLs, API keys, passwords, tokens, and private keys out of all chat-mode artifacts.
 
 For isolated-implementer mode, require explicit user intent, then use `scripts/chat-mode-worktree.ps1 -Action Prepare` with one or more `-WriteScope` patterns. Open the resulting sibling worktree in Claude. Do not let Claude write in the main worktree and do not let Codex edit tracked files in Claude's worktree during its turn.
 
@@ -94,22 +94,22 @@ Use `scripts/claude-desktop-uia.ps1` or equivalent native UIA calls.
 
 - Select the strongest available Opus model for the first architecture or adversarial review.
 - Use Sonnet for repeated routine turns when speed or usage matters.
-- For clean review and discussion sessions, use `EnableBypass -BypassContract review-readonly` by default. Record the clean branch, HEAD, upstream state, read-only actions, and declared inspection commands first.
-- For user-authorized host setup, use `EnableBypass -BypassContract host-setup-delegated` only after recording the clean project baseline, exact setup commands, non-secret config paths, allowed network hosts, credential boundaries, and restart authority.
+- For review and discussion sessions, use `EnableBypass -BypassContract review-readonly` by default, even when the repository is dirty. Record branch, HEAD, upstream state when available, dirty status, read-only actions, and declared inspection commands first.
+- For user-authorized host setup, use `EnableBypass -BypassContract host-setup-delegated` only after recording the current project baseline, exact setup commands, non-secret config paths, allowed network hosts, credential boundaries, and restart authority.
 - Record and report the exact worktree path, branch, base commit, `write_scope`, and authorized actions and commands before implementation.
 - When the user's task already authorizes those in-scope writes, set `Accept edits` for the isolated Claude session without requesting another confirmation.
 - Only when the user explicitly authorizes direct non-isolated access, use `EnableBypass -BypassContract direct-main-exclusive`. Verify Claude's fixed destructive-command warning and confirmation controls through UIA.
-- Keep `Manual` for dirty, unversioned, detached, or unusually sensitive review workspaces and when the user requests per-action confirmation.
+- Keep `Manual` only when the user requests per-action confirmation, the Claude workspace cannot be matched to the contract, or a trust/permission state is ambiguous.
 - Identify controls by accessible name and control type.
 - Fail on zero or multiple matches instead of guessing.
 
 Do not use hard-coded screen coordinates unless the user explicitly accepts a fragile, visible fallback.
 
-Neither `Accept edits` nor `Bypass permissions` is an OS-level path sandbox. Use Bypass only with the guarded `review-readonly`, `host-setup-delegated`, or `direct-main-exclusive` contract. The review profile is contractually read-only even though the UI mode is capable of mutation. Clean baselines, textual scope, and post-turn inspection detect violations but cannot prevent external access.
+Neither `Accept edits` nor `Bypass permissions` is an OS-level path sandbox. Use Bypass only with the guarded `review-readonly`, `host-setup-delegated`, or `direct-main-exclusive` contract. The review profile is contractually read-only even though the UI mode is capable of mutation. Baseline status, textual scope, and post-turn inspection detect violations but cannot prevent external access.
 
 ### 6. Send and monitor
 
-Send the prefilled prompt with the guarded Send ladder, preferably through `scripts/claude-desktop-uia.ps1 -Action SendPrompt -TextRegex <contract-specific text>`. Do not treat `invoked: Send` or any raw `InvokePattern` success as proof that Claude received the prompt. After every send attempt, verify a postcondition such as a visible `Stop` control, disabled empty `Send` button, or other evidence that the composer left the unsent state. Poll the Claude document text for the unique completion marker in intervals shorter than 60 seconds. When the sent prompt contains the marker, require at least two document matches so the echoed request cannot masquerade as Claude's handback. Share progress with the user between waits.
+Send the prefilled prompt with the guarded Send ladder, preferably through `scripts/claude-desktop-uia.ps1 -Action SendPrompt -TextRegex <contract-specific text> -ExpectedWorkspace <repo-leaf-when-known>`. Do not treat `invoked: Send` or any raw `InvokePattern` success as proof that Claude received the prompt. `SendPrompt` must diagnose or clear workspace/model/mode overlays before it actuates `Send`, and must use post-send evidence such as marker-count increase, visible `Stop`, or an empty disabled composer state. Poll the Claude document text for the unique completion marker in intervals shorter than 60 seconds. When the sent prompt contains the marker, require at least two document matches so the echoed request cannot masquerade as Claude's handback. Share progress with the user between waits.
 
 When Claude opens a permission prompt, compare its accessible text with the recorded contract. Use `ApprovePrompt` only for an exact, expected action and only when the helper finds one `Allow once` and one `Deny` control. This may include in-scope file access or a validation command already authorized by the task. Reject or escalate prompts for Git operations assigned to Codex, out-of-scope paths, undeclared commands, credentials, production or deployment access, destructive actions, or unexpected network access.
 
@@ -127,9 +127,9 @@ Treat any of the following as a hard stop:
 
 Read the complete Claude document through `TextPattern.DocumentRange`, extract the response associated with the current request, and preserve it in the session transcript. Do not rely on screenshots or OCR for long text.
 
-In review mode, verify the repository remains clean with unchanged branch, HEAD, commits, and upstream state. After a successful clean handback, leave Claude in `Bypass permissions` so the next review can reuse the already-enabled state. On mutation, ambiguity, timeout, malformed completion, or any other failed review, restore `Manual` and reject the turn. Codex evaluates Claude's recommendations; it does not automatically execute them.
+In review mode, verify branch, HEAD, commits, upstream state, and project status against the recorded baseline, allowing only pre-existing dirty paths. After a successful handback, leave Claude in `Bypass permissions` so the next review can reuse the already-enabled state. On new mutation, ambiguity, timeout, malformed completion, or any other failed review, restore `Manual` and reject the turn. Codex evaluates Claude's recommendations; it does not automatically execute them.
 
-In host-setup-delegated mode, restore `Manual` at session close, verify the project repository remains clean with unchanged branch, HEAD, commits, and upstream state, and verify only the recorded host setup state changed. Reject the turn if project files changed, secrets appeared in artifacts, or Claude exceeded the exact command, network, credential, restart, or config authority.
+In host-setup-delegated mode, restore `Manual` at session close, verify project status against the recorded baseline with unchanged branch, HEAD, commits, and upstream state, and verify only the recorded host setup state changed. Reject the turn if project files changed beyond the baseline, secrets appeared in artifacts, or Claude exceeded the exact command, network, credential, restart, or config authority.
 
 In isolated-implementer mode, freeze Claude's turn and run `scripts/chat-mode-worktree.ps1 -Action Inspect`. Require `ScopePassed`, review every changed path and the complete diff, reproduce tests, and verify the main worktree stayed clean. A completion marker is not permission to integrate. Apply or cherry-pick only within the user's original modification authority.
 
@@ -139,15 +139,15 @@ Continue only while the bounded contract permits another turn.
 
 ### 8. Close cleanly
 
-Record the final result and stop reason. Return control to the user. Report the completion marker, changed worktree, branch, diff status, tests, integration status, and any remaining cleanup. Keep Claude in `Bypass permissions` only after a successful clean `review-readonly` close. Restore `Manual` after host-setup or implementation handback, after any failed or ambiguous review, or when the user explicitly requests `Manual`. For direct-main-exclusive mode, inspect before running `chat-mode-direct-main.ps1 -Action Close` to archive the handoff metadata. Never delete an isolated worktree or branch automatically.
+Record the final result and stop reason. Return control to the user. Report the completion marker, changed worktree, branch, diff status, tests, integration status, and any remaining cleanup. Keep Claude in `Bypass permissions` after a successful `review-readonly` close, including dirty-baseline reviews where no new mutation occurred. Restore `Manual` after host-setup or implementation handback, after any failed or ambiguous review, or when the user explicitly requests `Manual`. For direct-main-exclusive mode, inspect before running `chat-mode-direct-main.ps1 -Action Close` to archive the handoff metadata. Never delete an isolated worktree or branch automatically.
 
 ## Fallback order
 
-1. Filesystem request plus background UIA control, guarded `SendPrompt`, post-send verification, and response reading.
-2. If Claude's composer is still not submitted, classify the failure (`send_not_submitted`, `send_blocked_by_overlay`, `keyboard_inserts_newline`, `send_ambiguous`, or `submitted_no_response`) before trying another method.
-3. For a permission selector that ignores `ExpandCollapse`, one guarded Space key on the uniquely focused Claude control only when process, focus, native handle, and existing foreground all match.
+1. Filesystem request plus background UIA control, guarded `Diagnose`, `ClearOverlay`, `SendPrompt`, post-send verification, and response reading.
+2. If Claude's composer is still not submitted, classify the failure (`send_not_submitted`, `send_blocked_by_overlay`, `send_blocked_by_dialog`, `keyboard_inserts_newline`, `send_ambiguous`, or `submitted_no_response`) before trying another method.
+3. For a selector that ignores `ExpandCollapse`, use `ClearOverlay` before escalating; only one guarded `Escape` is allowed when an overlay is positively detected, Claude is foreground, and focus is provably not the composer.
 4. Filesystem request plus a user-approved response file.
-5. Visible Computer Use only after the user agrees when controls UIA cannot expose or a visible overlay must be cleared. Use screenshot and accessibility state for targeting, then re-check whether the prompt submitted.
+5. Visible Computer Use only after the user agrees when controls UIA cannot expose or clear the relevant state. Use screenshot and accessibility state for targeting, then re-check whether the prompt submitted.
 6. Manual user action when authority expansion, repeated send failure, or ambiguous UI state requires a decision.
 
 Do not retry the same send method indefinitely. Keep automatic send attempts to a small bounded budget, normally no more than three methods or about 90 seconds. Never fall back to the removed PowerShell CLI runner, polling state machine, blind coordinate clicking, or simulated worker output.

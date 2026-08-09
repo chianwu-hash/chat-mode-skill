@@ -2,6 +2,30 @@
 
 This file records significant chat-mode-skill changes for future AI handoff. It is not a full transcript.
 
+## 2026-08-09 Make Bypass default and harden send overlay handling
+
+Status: completed
+Changed by: Codex
+Related task: User decision to prioritize Claude response efficiency and recurring workspace dropdown send failures
+
+Summary:
+
+- Updated the authority model so review sessions use guarded `Bypass permissions` even when a repository is already dirty; the request contract remains read-only by default, and Codex records baseline status to reject new mutation.
+- Kept host setup as the writable setup path for plugin/tool installation: exact setup commands, declared non-secret config paths, and no project edits or credentials.
+- Added UIA `Diagnose` and `ClearOverlay` actions and hardened `SendPrompt` around state-based overlay detection.
+- Replaced focus-based overlay detection with expanded controls, desktop-root Claude popups, trust/permission dialog detection, `Send` hit-testing, composer text where exposed, and marker-count postconditions.
+- Added `send_blocked_by_dialog` for trust, permission, or Bypass dialogs that must not be dismissed from the Send ladder.
+
+Important notes captured:
+
+- Dirty Git status is no longer a reason to fall back to Manual for read-only review. It is baseline evidence.
+- Bypass changes Claude Desktop prompt behavior; it does not expand review authority.
+- The observed send failure was a workspace dropdown overlay that could block sending even when focus was not on a menu.
+
+Validation:
+
+- PowerShell parser check passed for `claude-desktop-uia.ps1`.
+
 ## 2026-08-09 Add guarded SendPrompt workflow
 
 Status: completed
@@ -42,7 +66,7 @@ Summary:
 Important notes captured:
 
 - `skills/chat-mode/SKILL.md` and files under `skills/chat-mode/references/` remain source of truth.
-- Review Bypass is the default for clean read-only review and may persist after successful clean review.
+- Review Bypass is the default for read-only review and may persist after successful review.
 - Host setup, isolated implementation, and direct-main exclusive handoff are separate authority models.
 - Bypass is UI permission behavior, not an OS sandbox or general authority expansion.
 

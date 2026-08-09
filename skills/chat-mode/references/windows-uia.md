@@ -16,7 +16,7 @@ The 2026-08-08 smoke test confirmed these Claude Desktop patterns:
 | `Bypass permissions` confirmation | Button | Invoke |
 | `Allow once` | Button | Invoke |
 | `Deny` | Button | Invoke |
-| `Send` | Button | Invoke |
+| `Send` or `Send 3` | Button | Invoke |
 | Claude conversation | Document | Text |
 
 Accessible names may gain numeric shortcut suffixes. Match anchored regular expressions and control types rather than assuming the suffix.
@@ -63,7 +63,7 @@ pwsh -NoProfile -File $uia -Action Expand -NameRegex '^Accept edits$' -ControlTy
 pwsh -NoProfile -File $uia -Action Select -NameRegex '^Manual\b' -ControlType RadioButton
 ```
 
-For a clean review or discussion session, enable the default read-only Bypass profile with one guarded action:
+For a review or discussion session, enable the default read-only Bypass profile with one guarded action:
 
 ```powershell
 pwsh -NoProfile -File $uia `
@@ -71,7 +71,7 @@ pwsh -NoProfile -File $uia `
   -BypassContract 'review-readonly'
 ```
 
-This suppresses Claude permission prompts but does not grant write authority. The mailbox request must forbid mutation and the repository must pass the clean-baseline and post-turn checks in [review-bypass-readonly.md](review-bypass-readonly.md).
+This suppresses Claude permission prompts but does not grant write authority. The mailbox request must forbid mutation and Codex must compare the recorded baseline with post-turn status as described in [review-bypass-readonly.md](review-bypass-readonly.md).
 
 For a user-authorized host setup session, enable the setup Bypass profile with one guarded action:
 
@@ -101,7 +101,7 @@ Restore Manual before implementation handback inspection, after host setup, or a
 pwsh -NoProfile -File $uia -Action DisableBypass
 ```
 
-Do not call `DisableBypass` after a successful clean `review-readonly` close. Leave Bypass enabled; the next guarded `EnableBypass -BypassContract 'review-readonly'` call verifies and reuses the existing state idempotently.
+Do not call `DisableBypass` after a successful `review-readonly` close with no new mutation relative to baseline. Leave Bypass enabled; the next guarded `EnableBypass -BypassContract 'review-readonly'` call verifies and reuses the existing state idempotently.
 
 Approve an exact contract-matching prompt while in `Manual` mode:
 
@@ -134,7 +134,23 @@ pwsh -NoProfile -File $uia `
   -TextRegex $markerPattern
 ```
 
-`SendPrompt` is preferred over raw `Invoke` because some Claude Desktop states expose an enabled `Send` button and accept `InvokePattern` without actually submitting the composer. The helper treats `invoked: Send` as one attempt only, then checks for a visible `Stop` control or disabled empty `Send` state. It also detects focus held by menus or popups, sends one guarded `Escape` when appropriate, and falls back to guarded keyboard activation of the actual focused `Send` button.
+`SendPrompt` is preferred over raw `Invoke` because some Claude Desktop states expose an enabled `Send` button and accept `InvokePattern` without actually submitting the composer. The helper treats `invoked: Send` as one attempt only, then checks for post-send evidence such as marker-count increase, visible `Stop`, or disabled empty composer state. It diagnoses overlays by expanded controls, desktop-root Claude popups, and `FromPoint` hit-testing at the center of `Send`; focus control type is only corroborating evidence.
+
+Diagnose the current send state without sending:
+
+```powershell
+pwsh -NoProfile -File $uia -Action Diagnose
+```
+
+Clear a workspace/model/mode overlay without sending:
+
+```powershell
+pwsh -NoProfile -File $uia `
+  -Action ClearOverlay `
+  -ExpectedWorkspace 'chat-mode-skill'
+```
+
+`ClearOverlay` first tries `ExpandCollapsePattern.Collapse()` on the expanded trigger. For a workspace dropdown, it may re-select the already selected expected workspace row when `-ExpectedWorkspace` is supplied. A guarded `Escape` is a late fallback only when an overlay is positively detected, Claude is foreground, the focus is not the composer, and no trust/permission dialog is present.
 
 Do not use this as a success check:
 
@@ -164,23 +180,24 @@ Use two matches when the user's sent prompt contains the marker: one occurrence 
 
 ## Send-not-submitted diagnostics
 
-If `SendPrompt` throws `send_not_submitted`, `send_blocked_by_overlay`, or `send_ambiguous`, do not repeat the same action in a loop.
+If `SendPrompt` throws `send_not_submitted`, `send_blocked_by_overlay`, `send_blocked_by_dialog`, or `send_ambiguous`, do not repeat the same action in a loop.
 
 First inspect:
 
 ```powershell
+pwsh -NoProfile -File $uia -Action Diagnose
 pwsh -NoProfile -File $uia -Action List -NameRegex 'Send|Stop|Manual|Bypass|Accept edits|Trust|Allow once|Deny'
 pwsh -NoProfile -File $uia -Action ReadDocument
 ```
 
 Common causes:
 
-- a workspace or directory menu is open and focused, often exposed as `ControlType.Menu` with the workspace name;
+- a workspace or directory menu is open, exposed by an expanded trigger, a desktop-root Claude popup, or a `Send` hit-test mismatch;
 - a permission or trust dialog is present and must be handled by the contract-specific approval action;
 - the composer was not actually focused, so `Enter` or `Space` activated another control;
 - the `Send` control is visible but disabled because the composer is empty or Claude is already responding.
 
-Escalate to visible Computer Use only after the user agrees. Capture a fresh window state, close the visible overlay or click the exact screenshot-backed `Send` control once, then re-check whether the composer submitted. Stop after the bounded send budget and ask the user to send manually or switch to a response file.
+Escalate to visible Computer Use only after the user agrees and `Diagnose` / `ClearOverlay` cannot resolve the state. Capture a fresh window state, close the visible overlay or click the exact screenshot-backed `Send` control once, then re-check whether the composer submitted. Stop after the bounded send budget and ask the user to send manually or switch to a response file.
 
 ## Fail-safe behavior
 
@@ -196,6 +213,7 @@ The helper fails when:
 - the permission selector needs the keyboard fallback while Claude is not already foreground;
 - the requested UIA pattern is unsupported;
 - the document or marker is unavailable;
+- a trust, permission, or Bypass dialog is present during SendPrompt;
 - `SendPrompt` cannot prove the composer submitted after its bounded attempts;
 - the timeout expires.
 
@@ -210,4 +228,4 @@ Inspect the accessibility tree again after Claude updates its UI. Do not substit
 - A locked Windows session, detached RDP session, or app update may suspend UIA behavior.
 - UIA changes application state in the background even though it does not take foreground focus.
 - A Claude build with a broken `ExpandCollapse` implementation may require one guarded Space key while Claude is already foreground.
-- Claude may expose the composer `Send` button while a workspace menu or other overlay is still focused. In that state, `InvokePattern`, keyboard, and mouse input may be intercepted until the overlay is closed.
+- Claude may expose the composer `Send` button while a workspace menu or other overlay is open even when focus is not on that overlay. In that state, `InvokePattern`, keyboard, and mouse input may be intercepted until the overlay is closed.
