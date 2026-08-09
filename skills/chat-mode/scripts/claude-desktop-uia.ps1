@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('List', 'Expand', 'Select', 'Invoke', 'ApprovePrompt', 'ApproveWorkspaceTrust', 'EnableBypass', 'DisableBypass', 'ReadDocument', 'WaitText')]
+    [ValidateSet('List', 'Expand', 'Select', 'Invoke', 'SendPrompt', 'ApprovePrompt', 'ApproveWorkspaceTrust', 'EnableBypass', 'DisableBypass', 'ReadDocument', 'WaitText')]
     [string]$Action = 'List',
 
     [string]$ProcessName = 'claude',
@@ -285,6 +285,167 @@ function Invoke-GuardedFocusedSpace {
     [System.Windows.Forms.SendKeys]::SendWait(' ')
 }
 
+function Get-FocusedSummary {
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($null -eq $focused) {
+        return [PSCustomObject]@{
+            Name        = ''
+            ControlType = ''
+            ProcessId   = 0
+        }
+    }
+
+    return [PSCustomObject]@{
+        Name        = $focused.Current.Name
+        ControlType = $focused.Current.ControlType.ProgrammaticName
+        ProcessId   = $focused.Current.ProcessId
+    }
+}
+
+function Test-IsOverlayFocus {
+    param([PSCustomObject]$Focused)
+
+    if ([string]::IsNullOrWhiteSpace($Focused.ControlType)) {
+        return $false
+    }
+
+    if ($Focused.ControlType -in @(
+            'ControlType.Menu',
+            'ControlType.MenuItem',
+            'ControlType.ComboBox'
+        )) {
+        return $true
+    }
+
+    return $false
+}
+
+function Test-VisibleStop {
+    param([System.Windows.Automation.AutomationElement]$Root)
+
+    $stops = @(Get-MatchingElements `
+            -Root $Root `
+            -Pattern '^(?:Stop|停止)(?:\s+\S+)?$' `
+            -ExpectedType 'Button')
+
+    return @($stops | Where-Object {
+            $_.Current.IsEnabled -and -not $_.Current.IsOffscreen
+        }).Count -gt 0
+}
+
+function Test-SendSubmitted {
+    param(
+        [System.Windows.Automation.AutomationElement]$Root,
+        [int]$Seconds = 8
+    )
+
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($Seconds)
+    do {
+        if (Test-VisibleStop -Root $Root) {
+            return $true
+        }
+
+        $sendButtons = @(Get-MatchingElements `
+                -Root $Root `
+                -Pattern '^Send$' `
+                -ExpectedType 'Button')
+        if (
+            $sendButtons.Count -eq 1 -and
+            (-not $sendButtons[0].Current.IsEnabled)
+        ) {
+            return $true
+        }
+
+        Start-Sleep -Milliseconds 500
+    } while ([DateTimeOffset]::UtcNow -lt $deadline)
+
+    return $false
+}
+
+function Invoke-GuardedSendPrompt {
+    param(
+        [System.Windows.Automation.AutomationElement]$Root,
+        [string]$ExpectedTextRegex
+    )
+
+    Assert-SpecificTextRegex -Pattern $ExpectedTextRegex
+
+    $windowHandle = [IntPtr]$Root.Current.NativeWindowHandle
+    if ($windowHandle -eq [IntPtr]::Zero) {
+        throw 'Claude main window has no native handle for guarded send.'
+    }
+    $isForeground = [ChatModeWindowGuard]::GetForegroundWindow() -eq $windowHandle
+
+    if (Test-VisibleStop -Root $Root) {
+        Write-Output 'submitted: Claude is already responding'
+        return
+    }
+
+    $documentBefore = Get-DocumentText -Root $Root
+    if (-not [regex]::IsMatch($documentBefore, $ExpectedTextRegex)) {
+        throw 'Expected composer/request text was not visible before SendPrompt.'
+    }
+
+    $focused = Get-FocusedSummary
+    if ($isForeground -and (Test-IsOverlayFocus -Focused $focused)) {
+        [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+        Start-Sleep -Milliseconds 350
+        $focused = Get-FocusedSummary
+        if (Test-IsOverlayFocus -Focused $focused) {
+            throw "send_blocked_by_overlay: focus remains $($focused.ControlType) '$($focused.Name)' after Escape."
+        }
+    }
+
+    $send = Get-UniqueElement -Root $Root -Pattern '^Send$' -ExpectedType 'Button'
+    $sendName = $send.Current.Name
+    Invoke-Element -Element $send
+    if (Test-SendSubmitted -Root $Root) {
+        Write-Output "submitted: InvokePattern $sendName"
+        return
+    }
+
+    if (-not $isForeground) {
+        throw 'send_not_submitted: InvokePattern did not submit and keyboard fallback requires Claude to be foreground.'
+    }
+
+    $manual = $null
+    try {
+        $manual = Get-UniqueElement `
+            -Root $Root `
+            -Pattern '^(?:Manual|Accept edits|Bypass permissions)$' `
+            -ExpectedType 'Button'
+    }
+    catch {
+        throw "send_not_submitted: InvokePattern did not submit and no mode button was available for keyboard fallback. $($_.Exception.Message)"
+    }
+
+    $manual.SetFocus()
+    Start-Sleep -Milliseconds 150
+    [System.Windows.Forms.SendKeys]::SendWait('+{TAB}')
+    Start-Sleep -Milliseconds 200
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if (
+        $null -eq $focused -or
+        $focused.Current.ProcessId -ne $send.Current.ProcessId -or
+        $focused.Current.Name -ne 'Send' -or
+        $focused.Current.ControlType -ne [System.Windows.Automation.ControlType]::Button
+    ) {
+        $summary = Get-FocusedSummary
+        throw "send_not_submitted: Send focus fallback failed; focus is $($summary.ControlType) '$($summary.Name)'."
+    }
+    if ([ChatModeWindowGuard]::GetForegroundWindow() -ne $windowHandle) {
+        throw 'Foreground changed before Send keyboard fallback.'
+    }
+
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    if (Test-SendSubmitted -Root $Root) {
+        Write-Output 'submitted: focused Send + Enter'
+        return
+    }
+
+    throw 'send_not_submitted: composer still appears unsent after InvokePattern and focused Send + Enter.'
+}
+
 function Get-AncestorWindow {
     param([System.Windows.Automation.AutomationElement]$Element)
 
@@ -364,6 +525,15 @@ switch ($Action) {
         $element = Get-UniqueElement -Root $root -Pattern $NameRegex -ExpectedType $ControlType
         Invoke-Element -Element $element
         Write-Output "invoked: $($element.Current.Name)"
+        break
+    }
+
+    'SendPrompt' {
+        if ([string]::IsNullOrWhiteSpace($TextRegex)) {
+            throw '-TextRegex is required for SendPrompt and should match the expected request text or completion marker.'
+        }
+
+        Invoke-GuardedSendPrompt -Root $root -ExpectedTextRegex $TextRegex
         break
     }
 

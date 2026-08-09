@@ -208,15 +208,57 @@ Claude may write `turn-xxxx.response.md` only when the user explicitly authorize
 4. For implementation, record and report the exact selected worktree, branch, base, scope, actions, and commands.
 5. For clean review, enable Bypass with the guarded `review-readonly` contract. For host setup, enable Bypass with the guarded `host-setup-delegated` contract only after exact commands, non-secret config paths, credential boundary, and restart authority are recorded. For isolated implementation, enable `Accept edits` when the user's task authorizes the writes. For explicit direct main handoff, freeze Codex writes and enable Bypass through the guarded `direct-main-exclusive` contract.
 6. Open or reuse Claude Desktop Code and send a short poke containing the request path and marker.
-7. For each Claude permission prompt outside Bypass, atomically verify accessible text and approve once only when it matches the contract; stop on ambiguity or expansion.
-8. Poll accessible document text for the marker. If the sent prompt includes it, require a second occurrence from Claude's response. Do not infer completion from a settled screenshot or the echoed request.
-9. Enforce the deadline and response-size limit.
-10. Extract Claude's response and append it to the session transcript.
-11. Recheck project status. In review mode, leave Claude in `Bypass permissions` after a successful clean close so later reviews can reuse it. Restore `Manual` and reject the turn on any status, branch, HEAD, commit, or upstream mutation, or on ambiguity, timeout, malformed completion, or another failed review.
-12. In host-setup-delegated mode, restore `Manual`, verify the project repo stayed clean, verify only declared non-secret host setup changed, and confirm no secrets entered chat-mode artifacts.
-13. In isolated-implementer mode, freeze Claude, restore `Manual`, inspect the isolated diff, enforce `write_scope`, reproduce tests, and verify the main worktree stayed clean.
-14. In direct-main-exclusive mode, freeze Claude, restore `Manual`, inspect scope, branch, HEAD, commits, upstream, and full baseline diff before Codex resumes writing.
-15. Let Codex decide whether to accept the handback, request another bounded turn, or stop.
+7. Send the prefilled prompt with the Send ladder below. Treat raw UIA `InvokePattern` success as an input attempt, not as submission proof.
+8. For each Claude permission prompt outside Bypass, atomically verify accessible text and approve once only when it matches the contract; stop on ambiguity or expansion.
+9. Poll accessible document text for the marker. If the sent prompt includes it, require a second occurrence from Claude's response. Do not infer completion from a settled screenshot or the echoed request.
+10. Enforce the deadline and response-size limit.
+11. Extract Claude's response and append it to the session transcript.
+12. Recheck project status. In review mode, leave Claude in `Bypass permissions` after a successful clean close so later reviews can reuse it. Restore `Manual` and reject the turn on any status, branch, HEAD, commit, or upstream mutation, or on ambiguity, timeout, malformed completion, or another failed review.
+13. In host-setup-delegated mode, restore `Manual`, verify the project repo stayed clean, verify only declared non-secret host setup changed, and confirm no secrets entered chat-mode artifacts.
+14. In isolated-implementer mode, freeze Claude, restore `Manual`, inspect the isolated diff, enforce `write_scope`, reproduce tests, and verify the main worktree stayed clean.
+15. In direct-main-exclusive mode, freeze Claude, restore `Manual`, inspect scope, branch, HEAD, commits, upstream, and full baseline diff before Codex resumes writing.
+16. Let Codex decide whether to accept the handback, request another bounded turn, or stop.
+
+## Send ladder
+
+Use this bounded sub-protocol whenever a Claude Desktop composer contains a chat-mode poke.
+
+### L0: pre-flight
+
+Before any send attempt:
+
+- require exactly one target Claude Desktop main window;
+- require that Claude's native window is foreground before sending keyboard or mouse input;
+- reject or clear focus on `Menu`, `MenuItem`, `ComboBox`, transient popup, or modal controls before sending. A single guarded `Escape` is allowed when focus is on an overlay, but not when focus is in the composer;
+- verify the expected request text or completion marker is visible before attempting send;
+- require a single visible enabled `Send` control and no visible enabled `Stop` control.
+
+### L1-L3: automatic attempts
+
+Try at most a small bounded sequence, normally no more than three automatic methods or 90 seconds:
+
+1. Use the guarded helper action `SendPrompt`, which first tries UIA `InvokePattern` on `Send`.
+2. If the prompt is still not submitted and focus can be guarded to the actual `Send` button, use the guarded keyboard fallback (`Enter` on focused `Send`).
+3. Use coordinate clicking only when it is not blind: the process is DPI-aware or coordinates are translated correctly, Claude remains foreground, and hit testing proves the point resolves to the `Send` button or its child element immediately before the click.
+
+### L4-L6: escalation
+
+- Use visible Computer Use only after the user agrees, when UIA cannot expose or clear the relevant visual state. Capture a fresh screenshot and accessibility tree, perform one targeted action, then verify submission.
+- Open a fresh Claude session and replay the same request path at most once, and only after user agreement.
+- If send remains ambiguous or unsubmitted, stop and ask the user to press `Send`, or switch to a user-approved response file.
+
+### Post-send verification
+
+Never treat `invoked: Send` as success. After each send attempt, classify the outcome using fresh UI state:
+
+- `submitted`: a visible `Stop` control appears, the composer becomes empty/disabled, or a new user message matching the poke is visible.
+- `send_not_submitted`: the composer still contains the poke, `Stop` is absent, and no new user message appeared.
+- `send_blocked_by_overlay`: focus or hit testing shows a menu, popup, or modal intercepted the attempt.
+- `keyboard_inserts_newline`: the composer text grows only by a newline after a keyboard send attempt.
+- `send_ambiguous`: the composer changed but no response/`Stop` appears; do not auto-resend.
+- `submitted_no_response`: submission is confirmed but Claude does not answer before the normal deadline.
+
+When possible, verify composer state from the composer/edit control itself instead of searching the whole document. The sent user message remains in the transcript, so whole-document substring checks can falsely report that the poke is still in the composer.
 
 ## Bounds
 
@@ -230,6 +272,7 @@ Defaults:
 - one writer per working tree;
 - Bypass only under a guarded `review-readonly`, `host-setup-delegated`, or explicit `direct-main-exclusive` contract;
 - no automatic retries after an unexpected modal or malformed response.
+- no unbounded send retries; repeated `send_not_submitted` ends the turn with user-visible diagnostics.
 
 ## Completion
 
@@ -250,6 +293,9 @@ turn_limit_reached
 timeout
 user_stop
 authority_expansion_required
+send_not_submitted
+send_blocked_by_overlay
+send_ambiguous
 unexpected_mutation
 write_scope_violation
 integration_rejected
@@ -265,6 +311,7 @@ uia_unavailable
 - Never run both agents as writers in the same working tree.
 - Never open the main worktree as Claude's writable workspace except under an explicit direct-main-exclusive handoff.
 - Never infer authority beyond the user's task merely to keep the loop moving.
+- Never treat UIA `InvokePattern` success on `Send` as proof that a prompt was submitted.
 - Never treat `Accept edits` as path-level enforcement or approval for shell and Git commands.
 - Never enable `Bypass permissions` without a guarded `review-readonly`, guarded `host-setup-delegated`, or explicit `direct-main-exclusive` contract and the fixed warning confirmation.
 - Never use `host-setup-delegated` for project edits, Git mutation, deployment, destructive commands, or credential handling.
@@ -273,5 +320,6 @@ uia_unavailable
 - Never treat a completion marker as approval to integrate.
 - Never delete an isolated worktree or branch automatically.
 - Never use OCR as the source of truth for a long response.
-- Never retry a click blindly after UI state becomes uncertain.
+- Never retry a click blindly after UI state becomes uncertain; resolve overlays and verify hit targets first.
+- Never use whole-document substring matching as the only proof that a prompt remains unsent, because sent user messages also appear in the document text.
 - Never continue after the user creates `.chat-mode/STOP`.

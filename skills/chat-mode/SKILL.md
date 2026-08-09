@@ -109,13 +109,14 @@ Neither `Accept edits` nor `Bypass permissions` is an OS-level path sandbox. Use
 
 ### 6. Send and monitor
 
-Invoke the accessible `Send` button. Poll the Claude document text for the unique completion marker in intervals shorter than 60 seconds. When the sent prompt contains the marker, require at least two document matches so the echoed request cannot masquerade as Claude's handback. Share progress with the user between waits.
+Send the prefilled prompt with the guarded Send ladder, preferably through `scripts/claude-desktop-uia.ps1 -Action SendPrompt -TextRegex <contract-specific text>`. Do not treat `invoked: Send` or any raw `InvokePattern` success as proof that Claude received the prompt. After every send attempt, verify a postcondition such as a visible `Stop` control, disabled empty `Send` button, or other evidence that the composer left the unsent state. Poll the Claude document text for the unique completion marker in intervals shorter than 60 seconds. When the sent prompt contains the marker, require at least two document matches so the echoed request cannot masquerade as Claude's handback. Share progress with the user between waits.
 
 When Claude opens a permission prompt, compare its accessible text with the recorded contract. Use `ApprovePrompt` only for an exact, expected action and only when the helper finds one `Allow once` and one `Deny` control. This may include in-scope file access or a validation command already authorized by the task. Reject or escalate prompts for Git operations assigned to Codex, out-of-scope paths, undeclared commands, credentials, production or deployment access, destructive actions, or unexpected network access.
 
 Treat any of the following as a hard stop:
 
 - unexpected, ambiguous, or contract-expanding permission or trust dialog;
+- repeated `send_not_submitted` or ambiguous send state after the bounded Send ladder;
 - malformed or missing marker;
 - focus-sensitive behavior that could type into the wrong application;
 - timeout or output-size limit;
@@ -142,10 +143,11 @@ Record the final result and stop reason. Return control to the user. Report the 
 
 ## Fallback order
 
-1. Filesystem request plus background UIA control and response reading.
-2. For a permission selector that ignores `ExpandCollapse`, one guarded Space key on the uniquely focused Claude control only when process, focus, native handle, and existing foreground all match.
-3. Filesystem request plus a user-approved response file.
-4. Visible Computer Use only for controls UIA cannot expose.
-5. Manual user action when authority expansion or ambiguous UI state requires a decision.
+1. Filesystem request plus background UIA control, guarded `SendPrompt`, post-send verification, and response reading.
+2. If Claude's composer is still not submitted, classify the failure (`send_not_submitted`, `send_blocked_by_overlay`, `keyboard_inserts_newline`, `send_ambiguous`, or `submitted_no_response`) before trying another method.
+3. For a permission selector that ignores `ExpandCollapse`, one guarded Space key on the uniquely focused Claude control only when process, focus, native handle, and existing foreground all match.
+4. Filesystem request plus a user-approved response file.
+5. Visible Computer Use only after the user agrees when controls UIA cannot expose or a visible overlay must be cleared. Use screenshot and accessibility state for targeting, then re-check whether the prompt submitted.
+6. Manual user action when authority expansion, repeated send failure, or ambiguous UI state requires a decision.
 
-Never fall back to the removed PowerShell CLI runner, polling state machine, coordinate clicking, or simulated worker output.
+Do not retry the same send method indefinitely. Keep automatic send attempts to a small bounded budget, normally no more than three methods or about 90 seconds. Never fall back to the removed PowerShell CLI runner, polling state machine, blind coordinate clicking, or simulated worker output.

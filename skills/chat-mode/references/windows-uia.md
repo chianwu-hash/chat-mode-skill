@@ -125,11 +125,24 @@ pwsh -NoProfile -File $uia `
 
 This action additionally requires the accessible `Trust this workspace?` text, a unique control matching the exact path expression, exactly one `Trust Workspace` button, and exactly one `Cancel` button. A path mismatch fails closed.
 
-Send the prefilled prompt:
+Send the prefilled prompt with guarded postcondition checks:
+
+```powershell
+$markerPattern = [regex]::Escape('CHAT_MOD_20260808_0001_DONE')
+pwsh -NoProfile -File $uia `
+  -Action SendPrompt `
+  -TextRegex $markerPattern
+```
+
+`SendPrompt` is preferred over raw `Invoke` because some Claude Desktop states expose an enabled `Send` button and accept `InvokePattern` without actually submitting the composer. The helper treats `invoked: Send` as one attempt only, then checks for a visible `Stop` control or disabled empty `Send` state. It also detects focus held by menus or popups, sends one guarded `Escape` when appropriate, and falls back to guarded keyboard activation of the actual focused `Send` button.
+
+Do not use this as a success check:
 
 ```powershell
 pwsh -NoProfile -File $uia -Action Invoke -NameRegex '^Send$' -ControlType Button
 ```
+
+Raw `Invoke` may still be useful for ordinary controls, but for the chat composer it must be followed by the Send ladder in [protocol.md](protocol.md).
 
 Read the complete accessible document:
 
@@ -149,6 +162,26 @@ pwsh -NoProfile -File $uia -Action WaitText `
 
 Use two matches when the user's sent prompt contains the marker: one occurrence belongs to the request and the second must come from Claude's response. Repeat bounded waits while keeping the user informed.
 
+## Send-not-submitted diagnostics
+
+If `SendPrompt` throws `send_not_submitted`, `send_blocked_by_overlay`, or `send_ambiguous`, do not repeat the same action in a loop.
+
+First inspect:
+
+```powershell
+pwsh -NoProfile -File $uia -Action List -NameRegex 'Send|Stop|Manual|Bypass|Accept edits|Trust|Allow once|Deny'
+pwsh -NoProfile -File $uia -Action ReadDocument
+```
+
+Common causes:
+
+- a workspace or directory menu is open and focused, often exposed as `ControlType.Menu` with the workspace name;
+- a permission or trust dialog is present and must be handled by the contract-specific approval action;
+- the composer was not actually focused, so `Enter` or `Space` activated another control;
+- the `Send` control is visible but disabled because the composer is empty or Claude is already responding.
+
+Escalate to visible Computer Use only after the user agrees. Capture a fresh window state, close the visible overlay or click the exact screenshot-backed `Send` control once, then re-check whether the composer submitted. Stop after the bounded send budget and ask the user to send manually or switch to a response file.
+
 ## Fail-safe behavior
 
 The helper fails when:
@@ -163,6 +196,7 @@ The helper fails when:
 - the permission selector needs the keyboard fallback while Claude is not already foreground;
 - the requested UIA pattern is unsupported;
 - the document or marker is unavailable;
+- `SendPrompt` cannot prove the composer submitted after its bounded attempts;
 - the timeout expires.
 
 Inspect the accessibility tree again after Claude updates its UI. Do not substitute hard-coded coordinates silently.
@@ -176,3 +210,4 @@ Inspect the accessibility tree again after Claude updates its UI. Do not substit
 - A locked Windows session, detached RDP session, or app update may suspend UIA behavior.
 - UIA changes application state in the background even though it does not take foreground focus.
 - A Claude build with a broken `ExpandCollapse` implementation may require one guarded Space key while Claude is already foreground.
+- Claude may expose the composer `Send` button while a workspace menu or other overlay is still focused. In that state, `InvokePattern`, keyboard, and mouse input may be intercepted until the overlay is closed.
