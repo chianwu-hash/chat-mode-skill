@@ -8,17 +8,17 @@
 - Mutation check
 - Failure states
 
-Use this access profile as the default for fast Claude review and discussion. Claude Desktop runs in `Bypass permissions`, while the mailbox contract grants read-only project authority.
+Use this access profile only when the user requests prompt-free review or repeated Claude permission prompts materially slow a clear read-only session. Ordinary review/discussion should stay in `Manual` and operate Claude Desktop through Computer Use. When this profile is enabled, Claude Desktop runs in `Bypass permissions`, while the mailbox contract grants read-only project authority.
 
 ## Purpose and boundary
 
 - Keep Codex as the sole project writer.
 - Let Claude read, list, and search project files without permission prompts.
 - Allow only declared read-only inspection commands.
-- Enable guarded Bypass for review even when the repository already has dirty files; dirty status is baseline evidence, not authority.
+- Enable guarded Bypass for review only after recording the baseline, even when the repository already has dirty files; dirty status is baseline evidence, not authority.
 - Record branch, HEAD, upstream state when available, and `git status --porcelain=v1 --untracked-files=all` before sending.
 - Treat any new project mutation relative to the recorded baseline as a contract violation.
-- Leave Claude in `Bypass permissions` after a successful review so later review sessions can reuse the state.
+- Restore `Manual` when Bypass is no longer needed, on ambiguity, or after any failed review.
 - Restore `Manual` on any failed or ambiguous review, or when the user explicitly requests it.
 
 `Bypass permissions` is an application capability, not a read-only sandbox. The read-only boundary comes from the request contract, baseline status, and post-turn mutation inspection.
@@ -64,7 +64,7 @@ pwsh -NoProfile -File .\skills\chat-mode\scripts\claude-desktop-uia.ps1 `
 
 The helper accepts an already-enabled Bypass state or verifies the fixed warning and confirmation controls before enabling it. Keep the review contract read-only even though the application mode exposes broader capability.
 
-Use Bypass across bounded turns and later review sessions. After a successful review, first complete the mutation check, then leave Claude in Bypass. A later `EnableBypass -BypassContract 'review-readonly'` call is an idempotent guard check and accepts the already-enabled state without opening the selector.
+Use Bypass only while it is actively useful. After a successful review, first complete the mutation check, then either restore `Manual` or leave Bypass only if the user asked to keep prompt-free review available.
 
 On failure, ambiguity, or an explicit user request for Manual, restore Manual:
 

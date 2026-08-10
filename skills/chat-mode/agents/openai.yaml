@@ -1,4 +1,4 @@
 interface:
   display_name: "Chat Mode"
-  short_description: "Coordinate prompt-free review and implementation"
-  default_prompt: "Use $chat-mode for a prompt-free read-only Claude review, isolated implementation, or an explicit direct main-worktree handoff."
+  short_description: "Coordinate bounded Claude review and implementation"
+  default_prompt: "Use $chat-mode for a bounded Claude read-only review, isolated implementation, or explicit direct main-worktree handoff."

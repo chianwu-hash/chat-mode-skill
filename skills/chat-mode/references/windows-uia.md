@@ -1,8 +1,12 @@
 # Windows UI Automation Adapter
 
-## Why UIA
+## Role after Computer Use
 
-Windows UI Automation addresses accessible controls in a background window. It does not require moving the mouse, typing into the foreground application, or reading long responses from pixels.
+Computer Use is the default way to operate Claude Desktop for chat-mode. It makes visible UI state explicit: current workspace, open menus, prompt text, Send/Stop state, and completion progress. Use this UIA adapter only as a secondary helper when exact accessible text or guarded prompt approval is clearly more reliable than visual control.
+
+Do not use UIA to repair a visually stuck Claude UI. If workspace/model/mode menus, stale Bypass dialogs, or composer focus issues appear, switch to Computer Use, inspect the screenshot, and perform one visible correction.
+
+## Why keep UIA
 
 The 2026-08-08 smoke test confirmed these Claude Desktop patterns:
 
@@ -63,7 +67,7 @@ pwsh -NoProfile -File $uia -Action Expand -NameRegex '^Accept edits$' -ControlTy
 pwsh -NoProfile -File $uia -Action Select -NameRegex '^Manual\b' -ControlType RadioButton
 ```
 
-For a review or discussion session, enable the default read-only Bypass profile with one guarded action:
+For a review or discussion session, prefer Manual unless the user requests prompt-free Bypass or repeated permission prompts are slowing a clear session. If Bypass is needed, enable the read-only Bypass profile with one guarded action:
 
 ```powershell
 pwsh -NoProfile -File $uia `
@@ -101,7 +105,7 @@ Restore Manual before implementation handback inspection, after host setup, or a
 pwsh -NoProfile -File $uia -Action DisableBypass
 ```
 
-Do not call `DisableBypass` after a successful `review-readonly` close with no new mutation relative to baseline. Leave Bypass enabled; the next guarded `EnableBypass -BypassContract 'review-readonly'` call verifies and reuses the existing state idempotently.
+When Bypass controls look ambiguous, stale, or inconsistent, restore Manual and continue with Computer Use or ask the user.
 
 Approve an exact contract-matching prompt while in `Manual` mode:
 
@@ -125,7 +129,7 @@ pwsh -NoProfile -File $uia `
 
 This action additionally requires the accessible `Trust this workspace?` text, a unique control matching the exact path expression, exactly one `Trust Workspace` button, and exactly one `Cancel` button. A path mismatch fails closed.
 
-Send the prefilled prompt with guarded postcondition checks:
+Use Computer Use for sending prompts. Use `SendPrompt` only when the Claude UI is already visually clean and UIA state is known to be stable:
 
 ```powershell
 $markerPattern = [regex]::Escape('CHAT_MOD_20260808_0001_DONE')
@@ -134,7 +138,7 @@ pwsh -NoProfile -File $uia `
   -TextRegex $markerPattern
 ```
 
-`SendPrompt` is preferred over raw `Invoke` because some Claude Desktop states expose an enabled `Send` button and accept `InvokePattern` without actually submitting the composer. The helper treats `invoked: Send` as one attempt only, then checks for post-send evidence such as marker-count increase, visible `Stop`, or disabled empty composer state. It diagnoses overlays by expanded controls, desktop-root Claude popups, and `FromPoint` hit-testing at the center of `Send`; focus control type is only corroborating evidence.
+`SendPrompt` is no longer the default path. Some Claude Desktop states expose an enabled `Send` button and accept `InvokePattern` without actually submitting the composer. If `SendPrompt` fails once with an overlay, dialog, or not-submitted classification, stop using it for that turn and switch to Computer Use.
 
 Diagnose the current send state without sending:
 
@@ -180,7 +184,7 @@ Use two matches when the user's sent prompt contains the marker: one occurrence 
 
 ## Send-not-submitted diagnostics
 
-If `SendPrompt` throws `send_not_submitted`, `send_blocked_by_overlay`, `send_blocked_by_dialog`, or `send_ambiguous`, do not repeat the same action in a loop.
+If `SendPrompt` throws `send_not_submitted`, `send_blocked_by_overlay`, `send_blocked_by_dialog`, or `send_ambiguous`, do not repeat the same action in a loop and do not debug UIA for more than one short attempt.
 
 First inspect:
 
@@ -197,7 +201,7 @@ Common causes:
 - the composer was not actually focused, so `Enter` or `Space` activated another control;
 - the `Send` control is visible but disabled because the composer is empty or Claude is already responding.
 
-Escalate to visible Computer Use only after the user agrees and `Diagnose` / `ClearOverlay` cannot resolve the state. Capture a fresh window state, close the visible overlay or click the exact screenshot-backed `Send` control once, then re-check whether the composer submitted. Stop after the bounded send budget and ask the user to send manually or switch to a response file.
+Switch to Computer Use immediately when a workspace dropdown, mode dropdown, Bypass dialog, stale composer, or Send occlusion is visible or suspected. Capture a fresh screenshot, close or select through the visible overlay, click the screenshot-backed `Send` control once, then re-check whether Claude started responding. Stop after the bounded send budget and ask the user to send manually or switch to a response file.
 
 ## Fail-safe behavior
 

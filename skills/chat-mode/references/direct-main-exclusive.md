@@ -86,7 +86,7 @@ The request must tell Claude that Codex has frozen its writes, identify every al
 
 Open Claude Desktop Code with `folder=<repo_root>`. Approve workspace trust only when the accessible path exactly matches `repo_root`.
 
-Enable Bypass through the guarded action:
+Enable Bypass through a guarded visible flow. Prefer Computer Use to inspect and confirm the exact `direct-main-exclusive` warning and controls. Use the UIA helper only when the Bypass controls are stable and uniquely exposed:
 
 ```powershell
 pwsh -NoProfile -File .\skills\chat-mode\scripts\claude-desktop-uia.ps1 `
@@ -94,9 +94,9 @@ pwsh -NoProfile -File .\skills\chat-mode\scripts\claude-desktop-uia.ps1 `
   -BypassContract 'direct-main-exclusive'
 ```
 
-The helper requires the accessible Bypass option, the `Bypass all permissions?` dialog, Claude's fixed warning about destructive commands, one Cancel button, and one Bypass confirmation button. Stop if any element is absent or ambiguous.
+The confirmation requires the Bypass option, the `Bypass all permissions?` dialog, Claude's fixed warning about destructive commands, one Cancel button, and one Bypass confirmation button. Stop if any element is absent or ambiguous.
 
-Do not edit the selected worktree while Claude owns it. Monitoring, UIA control, read-only Git inspection after the marker, and user updates remain allowed.
+Do not edit the selected worktree while Claude owns it. Monitoring, Computer Use control, read-only Git inspection after the marker, and user updates remain allowed.
 
 ## Inspection and close
 
@@ -140,7 +140,7 @@ Close archives metadata and inspection under `.chat-mode/sessions/`; it does not
 Stop before Codex resumes writing when:
 
 - Claude has not returned to `Manual`;
-- UIA state, marker, branch, HEAD, upstream, or operation log is ambiguous;
+- Claude UI state, marker, branch, HEAD, upstream, or operation log is ambiguous;
 - changes leave `write_scope` or the repository without explicit authority;
 - Git, network, credential, deployment, or destructive actions exceed the contract;
 - diff inspection fails, secrets appear, or validation cannot be reproduced;

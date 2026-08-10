@@ -60,13 +60,13 @@ After preparation, record and report:
 - authorized actions and validation commands;
 - that `Accept edits` is UI permission rather than an OS path sandbox.
 
-The user's implementation request delegates ordinary project-local reads, in-scope writes, and necessary validation already implied by the task. Do not request a second confirmation for that same authority. Use background UIA to set the isolated Claude session to `Accept edits`, or keep `Manual` when testing prompt approval or when the contract requires per-action review.
+The user's implementation request delegates ordinary project-local reads, in-scope writes, and necessary validation already implied by the task. Do not request a second confirmation for that same authority. Use Computer Use to visibly set the isolated Claude session to `Accept edits`, or keep `Manual` when testing prompt approval or when the contract requires per-action review. Use UIA only when the visible state is already clear and the exact control match is stable.
 
 Delegation expires when the session ends. Re-evaluate any change to the worktree, branch, base commit, scope, action set, or command set. Ask the user only when the change expands the original request or materially changes its risk.
 
 Keep `Manual` instead when the user requests per-edit approval, secrets or production credentials are present, or the isolated worktree is not an adequate risk boundary.
 
-Codex may approve a Claude prompt only after accessible text identifies an exact contract-matching action. Examples include an in-scope file write or a declared test command. Use the guarded UIA helper so the text check and button invocation happen in one operation.
+Codex may approve a Claude prompt only after visible or accessible text identifies an exact contract-matching action. Examples include an in-scope file write or a declared test command. Prefer Computer Use for visible prompt approval; use the guarded UIA helper only when exact accessible text is stable and uniquely matches the contract.
 
 Do not approve:
 
@@ -169,4 +169,4 @@ Stop without integrating when:
 - tests fail or cannot be reproduced;
 - the diff contains unexplained generated files or secrets;
 - Claude commits, pushes, rewrites history, or modifies worktree metadata;
-- UIA state becomes ambiguous or the deadline expires.
+- Claude UI state becomes ambiguous or the deadline expires.
