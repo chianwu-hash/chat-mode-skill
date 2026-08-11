@@ -2,6 +2,30 @@
 
 This file records significant chat-mode-skill changes for future AI handoff. It is not a full transcript.
 
+## 2026-08-11 Reuse trusted projects for new Claude conversations
+
+Status: completed
+Changed by: Codex
+Related task: Repeated workspace-trust prompts and stale Manual defaults during review research
+
+Summary:
+
+- Synchronized the installable skill with the repository decision that ordinary review uses guarded `Bypass permissions` by default.
+- Changed session startup so an existing Claude project uses `New session in <workspace>` and receives the mailbox poke in that conversation.
+- Reserved `folder=` deep links for genuinely new or unavailable paths, especially isolated worktrees.
+- Allowed explicitly authorized public-web research to declare bounded public hosts while keeping review project access read-only.
+
+Expected effect:
+
+- Ordinary new conversations in an already trusted project should no longer re-enter workspace trust flow.
+- Review research should not stall on repeated permission prompts when the guarded Bypass contract is active.
+
+Validation:
+
+- Skill-creator validation passed and the UIA PowerShell script parsed successfully.
+- A live Claude Desktop check used `New session in chat-mode-skill`, selected the expected workspace, and did not display `Trust this workspace?`.
+- The live check exposed a retained unsent composer draft, so the protocol now requires clearing or fully replacing any stale draft before sending.
+
 ## 2026-08-09 Make Bypass default and harden send overlay handling
 
 Status: completed

@@ -84,7 +84,7 @@ The request must tell Claude that Codex has frozen its writes, identify every al
 
 ## Bypass handoff
 
-Open Claude Desktop Code with `folder=<repo_root>`. Approve workspace trust only when the accessible path exactly matches `repo_root`.
+Reuse the existing Claude project through `New session in <workspace>` when `repo_root` is already available. Use `folder=<repo_root>` only when the path is not listed or available. Approve workspace trust only when it appears for a newly opened path and the accessible path exactly matches `repo_root`.
 
 Enable Bypass through a guarded visible flow. Prefer Computer Use to inspect and confirm the exact `direct-main-exclusive` warning and controls. Use the UIA helper only when the Bypass controls are stable and uniquely exposed:
 

@@ -6,6 +6,8 @@ Computer Use is the default way to operate Claude Desktop for chat-mode. It make
 
 Do not use UIA to repair a visually stuck Claude UI. If workspace/model/mode menus, stale Bypass dialogs, or composer focus issues appear, switch to Computer Use, inspect the screenshot, and perform one visible correction.
 
+For an existing Claude project, start a conversation through the visible `New session in <workspace>` control, then clear or fully replace any retained composer draft before entering the poke. Do not reopen an already trusted workspace through a `folder=` deep link merely to create a new conversation. Reserve folder deep links and workspace-trust handling for genuinely new or unavailable paths, especially isolated worktrees.
+
 ## Why keep UIA
 
 The 2026-08-08 smoke test confirmed these Claude Desktop patterns:
@@ -67,7 +69,7 @@ pwsh -NoProfile -File $uia -Action Expand -NameRegex '^Accept edits$' -ControlTy
 pwsh -NoProfile -File $uia -Action Select -NameRegex '^Manual\b' -ControlType RadioButton
 ```
 
-For a review or discussion session, prefer Manual unless the user requests prompt-free Bypass or repeated permission prompts are slowing a clear session. If Bypass is needed, enable the read-only Bypass profile with one guarded action:
+For a review or discussion session, default to the read-only Bypass profile after recording the mailbox contract and repository baseline. Enable it with one guarded action:
 
 ```powershell
 pwsh -NoProfile -File $uia `

@@ -12,7 +12,7 @@ Run Codex as the orchestrator and Claude Desktop Code as a bounded reviewer, iso
 1. Keep Codex as the only orchestrator. Claude must not invoke Codex or start a nested chat-mode loop.
 2. Use files for durable requests and transcripts. Use Computer Use as the primary Claude Desktop control plane; use UIA as an optional text-reading or exact-control helper, not as the default send path.
 3. Treat the user's task as delegated authority for necessary project-local reads, in-scope writes, and declared validation. Let Codex verify and approve matching Claude prompts; ask the user only when authority would expand or risk materially changes.
-4. Default Claude Desktop to `Manual` plus Computer Use for ordinary review/discussion. Use guarded `Bypass permissions` only when the user requests prompt-free operation or the session mode clearly benefits from it; the mailbox contract remains the authority boundary. For review or discussion, `review-readonly` keeps Codex as the sole writer and explicitly forbids edits, commits, pushes, destructive commands, network access, credentials, deployment, and external paths. For tool installation or machine setup, use `host-setup-delegated` with exact declared setup commands and non-secret config writes.
+4. Default Claude Desktop to guarded `Bypass permissions` plus Computer Use for ordinary review/discussion after recording the baseline and `review-readonly` mailbox contract. The mailbox contract remains the authority boundary. Use `Manual` only when the user explicitly requests per-action approval, the workspace or Bypass state cannot be verified, or a failed or ambiguous session requires safe recovery. For review or discussion, `review-readonly` keeps Codex as the sole writer and explicitly forbids edits, commits, pushes, destructive commands, credentials, deployment, and undeclared external access. Network authority is `none` unless the user's task explicitly requires public-web research and the request lists the allowed public hosts. For tool installation or machine setup, use `host-setup-delegated` with exact declared setup commands and non-secret config writes.
 5. Bound every session by turns, time, and response size. Default to 3 turns and a 5-minute limit per Claude turn.
 6. Use one writer per working tree. In review mode, Codex is the sole project writer. In implementation modes, hand the selected working tree exclusively to Claude and freeze Codex writes until handback.
 7. Require a Git repository, clean selected worktree, baseline commit and branch, explicit `write_scope`, and authorized action and command sets before implementation.
@@ -20,7 +20,7 @@ Run Codex as the orchestrator and Claude Desktop Code as a bounded reviewer, iso
 
 Read [references/protocol.md](references/protocol.md) before starting a real session. On Windows, read [references/windows-uia.md](references/windows-uia.md) only when you plan to use the UIA helper; ordinary Claude Desktop operation should use Computer Use.
 
-When the user asks for prompt-free review or repeated Claude permission prompts make Bypass worthwhile, read [references/review-bypass-readonly.md](references/review-bypass-readonly.md) before enabling the read-only Bypass profile.
+For every review or discussion session, read [references/review-bypass-readonly.md](references/review-bypass-readonly.md) before enabling the default read-only Bypass profile.
 
 When the user asks Claude to install plugins, configure host tools, or perform machine-level setup without project file edits, read [references/host-setup-delegated.md](references/host-setup-delegated.md) before enabling guarded setup Bypass.
 
@@ -40,7 +40,7 @@ Confirm or infer:
 - actions and commands delegated by the user's request;
 - completion marker unique to the turn.
 
-Default to `review` with a read-only mailbox contract, `Manual` permission mode, and Computer Use operation. Use the guarded `review-readonly` Bypass profile only when the user requests prompt-free review or repeated permission prompts materially slow a clear session. Do not confuse Claude Desktop's permission UI with task authority, and do not expand authority merely to keep the loop moving.
+Default to `review` with a read-only mailbox contract, guarded `Bypass permissions`, and Computer Use operation. Fall back to `Manual` only for explicit per-action approval, an unverifiable workspace or permission state, or failed/ambiguous recovery. Do not confuse Claude Desktop's permission UI with task authority, and do not expand authority merely to keep the loop moving.
 
 Use `host-setup-delegated` only for user-requested host setup such as installing a Claude plugin or configuring a local tool. This mode may authorize exact setup commands and non-secret config writes, but it must not authorize project edits, Git mutation, deployment, destructive commands, or credential disclosure.
 
@@ -72,7 +72,11 @@ For a minimal session, Claude may answer in its chat while ending with the uniqu
 
 ### 4. Open Claude Desktop Code
 
-Prefer the deep link:
+When the contracted workspace already appears in Claude Desktop, reuse it through the visible `New session in <workspace>` control, then clear or fully replace any retained composer draft with the short poke. Verify the selected workspace label and current poke before sending. This is the default path for review, discussion, host setup, and direct-main sessions in an existing project.
+
+Do not pass `folder=` merely to start another conversation in an already trusted workspace. Re-specifying an existing folder through an external URI may re-enter workspace-opening flow and trigger an unnecessary `Trust this workspace?` prompt.
+
+Use the deep link only when the contracted path is not already available in Claude Desktop, such as a genuinely new project or a newly prepared isolated worktree:
 
 ```text
 claude://code/new?q=<url-encoded-poke>&folder=<url-encoded-repo-root>
@@ -84,7 +88,7 @@ The poke should be short, for example:
 Read .chat-mode/exchange/<session-id>/turn-0001.request.md, follow its contract, respond here, and end with <marker>.
 ```
 
-Use the main repository as `folder` for review, host-setup-delegated, and direct-main-exclusive modes, and the isolated worktree as `folder` for isolated implementation.
+When a deep link is necessary, use the main repository as `folder` for review, host-setup-delegated, and direct-main-exclusive modes, and the isolated worktree as `folder` for isolated implementation.
 
 If Claude displays `Trust this workspace?`, compare the accessible path with the exact repository or isolated worktree in the contract. Use the guarded `ApproveWorkspaceTrust` action when it matches uniquely. Stop and ask the user on mismatch or ambiguity.
 
@@ -94,7 +98,7 @@ Use Computer Use to target the Claude window, inspect the screenshot, close visi
 
 - Select the strongest available Opus model for the first architecture or adversarial review.
 - Use Sonnet for repeated routine turns when speed or usage matters.
-- Prefer `Manual` for ordinary review/discussion unless the user explicitly wants prompt-free Bypass or repeated permission prompts are materially slowing an otherwise clear session. When using Bypass, keep the mailbox contract authoritative and record branch, HEAD, upstream state when available, dirty status, read-only actions, and declared inspection commands first.
+- Prefer guarded `Bypass permissions` for ordinary review/discussion. Before enabling it, keep the mailbox contract authoritative and record branch, HEAD, upstream state when available, dirty status, read-only actions, declared inspection commands, and any explicitly allowed public-web hosts. Use `Manual` only for the documented exception states.
 - For user-authorized host setup, use Bypass only after recording the current project baseline, exact setup commands, non-secret config paths, allowed network hosts, credential boundaries, and restart authority.
 - Record and report the exact worktree path, branch, base commit, `write_scope`, and authorized actions and commands before implementation.
 - When the user's task already authorizes those in-scope writes, set `Accept edits` for the isolated Claude session without requesting another confirmation.
@@ -138,11 +142,11 @@ Continue only while the bounded contract permits another turn.
 
 ### 8. Close cleanly
 
-Record the final result and stop reason. Return control to the user. Report the completion marker, changed worktree, branch, diff status, tests, integration status, and any remaining cleanup. Leave Claude in `Manual` for ordinary reviews. Restore `Manual` after host-setup or implementation handback, after any failed or ambiguous review, or when Bypass is no longer needed. For direct-main-exclusive mode, inspect before running `chat-mode-direct-main.ps1 -Action Close` to archive the handoff metadata. Never delete an isolated worktree or branch automatically.
+Record the final result and stop reason. Return control to the user. Report the completion marker, changed worktree, branch, diff status, tests, integration status, and any remaining cleanup. Leave Claude in guarded `Bypass permissions` after a successful ordinary review so the next review retains the configured default. Restore `Manual` after host-setup or implementation handback, after any failed or ambiguous review, or when the user explicitly requests per-action approval. For direct-main-exclusive mode, inspect before running `chat-mode-direct-main.ps1 -Action Close` to archive the handoff metadata. Never delete an isolated worktree or branch automatically.
 
 ## Fallback order
 
-1. Filesystem request plus Computer Use: open/reuse Claude, visually select the workspace, paste or use the deep-linked poke, close overlays, click Send, and verify response progress.
+1. Filesystem request plus Computer Use: reuse an existing Claude project through `New session in <workspace>` and paste the poke; use a folder deep link only for a new or unavailable path. Close overlays, click Send, and verify response progress.
 2. If Claude's composer is still not submitted, classify the visible failure (`workspace_overlay_open`, `permission_dialog`, `send_not_clicked`, `submitted_no_response`, or `send_ambiguous`) and try at most one visible correction.
 3. Use UIA only for exact-text reading, guarded permission approval, or clipboard/accessible response extraction when Computer Use has already established the correct visible state.
 4. Filesystem request plus a user-approved response file.

@@ -8,7 +8,7 @@
 - Mutation check
 - Failure states
 
-Use this access profile only when the user requests prompt-free review or repeated Claude permission prompts materially slow a clear read-only session. Ordinary review/discussion should stay in `Manual` and operate Claude Desktop through Computer Use. When this profile is enabled, Claude Desktop runs in `Bypass permissions`, while the mailbox contract grants read-only project authority.
+Use this access profile by default for ordinary review/discussion. Claude Desktop runs in `Bypass permissions`, while the mailbox contract grants read-only project authority and Computer Use keeps the visible workspace and permission state auditable. Use `Manual` only when the user explicitly requests per-action approval, the workspace or Bypass state cannot be verified, or a failed/ambiguous session requires safe recovery.
 
 ## Purpose and boundary
 
@@ -18,8 +18,8 @@ Use this access profile only when the user requests prompt-free review or repeat
 - Enable guarded Bypass for review only after recording the baseline, even when the repository already has dirty files; dirty status is baseline evidence, not authority.
 - Record branch, HEAD, upstream state when available, and `git status --porcelain=v1 --untracked-files=all` before sending.
 - Treat any new project mutation relative to the recorded baseline as a contract violation.
-- Restore `Manual` when Bypass is no longer needed, on ambiguity, or after any failed review.
-- Restore `Manual` on any failed or ambiguous review, or when the user explicitly requests it.
+- Leave guarded Bypass enabled after a successful ordinary review once the mutation check passes.
+- Restore `Manual` only on a failed or ambiguous review, an unverifiable workspace/permission state, or when the user explicitly requests per-action approval.
 
 `Bypass permissions` is an application capability, not a read-only sandbox. The read-only boundary comes from the request contract, baseline status, and post-turn mutation inspection.
 
@@ -44,13 +44,13 @@ authorized_actions:
 authorized_commands:
   - <exact-or-bounded-read-only-command>
 git_authority: read-only
-network_authority: none
+network_authority: <none-or-explicit-allowed-public-hosts>
 credential_authority: none
 deployment_authority: none
 external_paths: []
 ```
 
-Explicitly forbid file creation or modification, Git mutation, destructive commands, network access, credentials, deployment, and paths outside the repository. Claude must respond in chat; do not authorize a response file.
+Explicitly forbid file creation or modification, Git mutation, destructive commands, credentials, deployment, and undeclared paths or network access. Default network authority to `none`; when the user's task explicitly requires public-web research, list the allowed public hosts in the request. Claude must respond in chat; do not authorize a response file.
 
 ## Bypass lifecycle
 
@@ -64,7 +64,7 @@ pwsh -NoProfile -File .\skills\chat-mode\scripts\claude-desktop-uia.ps1 `
 
 The helper accepts an already-enabled Bypass state or verifies the fixed warning and confirmation controls before enabling it. Keep the review contract read-only even though the application mode exposes broader capability.
 
-Use Bypass only while it is actively useful. After a successful review, first complete the mutation check, then either restore `Manual` or leave Bypass only if the user asked to keep prompt-free review available.
+After a successful review, first complete the mutation check, then leave guarded Bypass enabled as the ordinary review default. Restore `Manual` only for the documented exception states.
 
 On failure, ambiguity, or an explicit user request for Manual, restore Manual:
 
@@ -98,7 +98,7 @@ Stop and restore Manual when:
 - the baseline cannot be recorded or compared;
 - Claude creates, modifies, deletes, renames, stages, or commits a project file;
 - Claude runs an undeclared or mutating command;
-- Claude accesses the network, credentials, deployment targets, external paths, nested repositories, or submodules without explicit authority;
+- Claude accesses credentials, deployment targets, external paths, nested repositories, submodules, or network hosts without explicit authority;
 - the Bypass dialog or mode state is ambiguous;
 - the completion marker is missing or malformed;
 - `.chat-mode/STOP` exists.

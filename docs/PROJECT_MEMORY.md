@@ -1,6 +1,6 @@
 # Project Memory
 
-Last reviewed: 2026-08-08
+Last reviewed: 2026-08-11
 
 This file records durable project knowledge for future Codex / Claude sessions. It is not the full protocol. The source of truth remains:
 
@@ -73,6 +73,22 @@ Decision:
 - Detect blocking state with expanded controls, desktop-root Claude popups, trust/permission dialogs, composer state, marker-count baselines, and `FromPoint` hit-testing at the center of `Send`.
 - Workspace dropdowns should be cleared with `ExpandCollapsePattern.Collapse()` first, then by re-selecting the already-selected expected workspace row when safe, then guarded `Escape` only when focus is provably not the composer.
 - A trust, permission, or Bypass dialog is `send_blocked_by_dialog` and must be handled by contract-specific approval, not by the Send ladder.
+
+### Existing Claude projects reuse trusted workspaces
+
+Status: active
+Scope: Claude Desktop session startup
+Primary source: `skills/chat-mode/SKILL.md`, `skills/chat-mode/references/protocol.md`
+
+Decision:
+
+- When the contracted project already appears in Claude Desktop, start through `New session in <workspace>`, clear or fully replace any retained composer draft, and enter the mailbox poke.
+- Do not use a `folder=` deep link merely to create another conversation in an already trusted project.
+- Reserve folder deep links and workspace-trust approval for genuinely new or unavailable paths, especially newly prepared isolated worktrees.
+
+Reason:
+
+- Re-specifying an existing folder through an external URI can re-enter workspace-opening flow, trigger unnecessary trust prompts, and create workspace-menu or composer-focus interference.
 
 ### Host setup has its own guarded Bypass contract
 

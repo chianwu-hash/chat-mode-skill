@@ -60,8 +60,8 @@ For equal access in the current main worktree:
 Codex should:
 
 1. write a bounded request under `.chat-mode/exchange/`;
-2. open the repository in Claude Desktop Code;
-3. verify workspace trust and permission prompts against the task contract;
+2. reuse the existing Claude project through `New session in <workspace>`, or open a new path only when needed;
+3. verify workspace trust only for a genuinely new path and match all permission prompts against the task contract;
 4. select the requested model and the permission mode allowed by the session contract through background UIA;
 5. send a short request-file pointer;
 6. read Claude's accessible response text until the unique completion marker appears;
@@ -90,7 +90,9 @@ After Claude stops, Codex inspects the complete diff, checks scope, reproduces t
 
 ## Read-only review
 
-For review and discussion, chat-mode defaults Claude Desktop to guarded Bypass under a `review-readonly` contract. This removes routine prompts while Claude reads, lists, searches, and inspects the project. Codex remains the sole writer, and the request forbids edits, Git mutation, network access, credentials, deployment, destructive commands, and external paths.
+For review and discussion, chat-mode defaults Claude Desktop to guarded Bypass under a `review-readonly` contract. This removes routine prompts while Claude reads, lists, searches, and inspects the project. Codex remains the sole writer, and the request forbids edits, Git mutation, credentials, deployment, destructive commands, and undeclared network or external-path access. Public-web research must list its allowed public hosts.
+
+When the project already exists in Claude Desktop, chat-mode creates the conversation through `New session in <workspace>`, clears or fully replaces any retained composer draft, and reuses the trusted workspace. A `folder=` deep link is reserved for genuinely new or unavailable paths, such as a newly prepared isolated worktree, so ordinary new conversations do not repeatedly trigger workspace trust.
 
 Review Bypass is the default even when the repository already has dirty files. Codex records branch, HEAD, upstream state when available, and the current status before sending. After a successful review with no new mutation relative to that baseline, chat-mode leaves Claude in Bypass so the next review can reuse the already-enabled state. It restores `Manual` on failure or ambiguity and rejects the turn if branch, HEAD, commits, upstream state, or project status changes beyond the recorded baseline.
 

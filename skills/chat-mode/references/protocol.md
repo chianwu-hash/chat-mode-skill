@@ -35,7 +35,7 @@ For isolated implementation, create the same `.chat-mode/` layout inside Claude'
 
 ### `review`
 
-Claude reads the main repository and responds without modifying project files. Codex is the sole project writer. The default UI permission profile is `Manual`, operated through Computer Use, under a `review-readonly` contract. Guarded Bypass is optional for prompt-free reviews or noisy repeated read prompts. Record the baseline status and reject new mutation.
+Claude reads the main repository and responds without modifying project files. Codex is the sole project writer. The default UI permission profile is guarded `Bypass permissions`, operated through Computer Use, under a `review-readonly` contract. `Manual` is an exception for explicit per-action approval, unverifiable workspace/permission state, or failed/ambiguous recovery. Record the baseline status and reject new mutation.
 
 Read [review-bypass-readonly.md](review-bypass-readonly.md) before using Bypass for a review profile.
 
@@ -206,8 +206,8 @@ Claude may write `turn-xxxx.response.md` only when the user explicitly authorize
 2. Capture `git status --short` and `HEAD` when available.
 3. Write the request file atomically.
 4. For implementation, record and report the exact selected worktree, branch, base, scope, actions, and commands.
-5. For review, prefer `Manual` unless the user requests prompt-free review or repeated permission prompts make Bypass worthwhile. If Bypass is used, record branch, HEAD, upstream state when available, dirty baseline status, and the guarded contract first. For host setup, enable Bypass only after exact commands, non-secret config paths, credential boundary, and restart authority are recorded. For isolated implementation, enable `Accept edits` when the user's task authorizes the writes. For explicit direct main handoff, freeze Codex writes and enable Bypass only after the guarded `direct-main-exclusive` contract is recorded.
-6. Open or reuse Claude Desktop Code and send a short poke containing the request path and marker.
+5. For review, default to guarded Bypass after recording branch, HEAD, upstream state when available, dirty baseline status, the read-only contract, declared inspection commands, and any explicitly allowed public-web hosts. Use `Manual` only for the documented exception states. For host setup, enable Bypass only after exact commands, non-secret config paths, credential boundary, and restart authority are recorded. For isolated implementation, enable `Accept edits` when the user's task authorizes the writes. For explicit direct main handoff, freeze Codex writes and enable Bypass only after the guarded `direct-main-exclusive` contract is recorded.
+6. Open or reuse Claude Desktop Code. If the contracted workspace is already listed, activate `New session in <workspace>`, clear or fully replace any retained composer draft, and enter the short poke there. Use `claude://code/new?...&folder=...` only for a genuinely new or unavailable path, including a newly prepared isolated worktree. Do not re-specify an already trusted folder merely to create another conversation.
 7. Send the prefilled prompt with the Computer Use send ladder below. Treat a click, key press, or UIA `InvokePattern` as an input attempt, not as submission proof.
 8. For each Claude permission prompt outside Bypass, atomically verify accessible text and approve once only when it matches the contract; stop on ambiguity or expansion.
 9. Poll for the marker with bounded waits. If the sent prompt includes it, require a second occurrence from Claude's response or visible completion plus copied response text containing the marker. Do not infer completion from a settled screenshot or the echoed request.
