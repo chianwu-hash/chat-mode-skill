@@ -100,10 +100,11 @@ pwsh -NoProfile -File .\skills\chat-mode\scripts\claude-cli-supervisor.ps1 `
   -RequestPath '<working-tree>/.chat-mode/exchange/<session-id>/turn-0001.request.md' `
   -TimeoutSeconds 300 `
   -MaxResponseBytes 50000 `
-  -MaxAgentTurns 12
+  -MaxAgentTurns 12 `
+  -ShowConversationViewer
 ```
 
-The supervisor verifies version and subscription auth, denies API fallback, excludes project/local Claude settings and MCP discovery, exposes mode-specific tools, enforces STOP/timeout/marker/size checks, stores the Claude session ID and contract fingerprint, writes artifacts, and rejects review Git mutation.
+The supervisor verifies version and subscription auth, denies API fallback, excludes project/local Claude settings and MCP discovery, exposes mode-specific tools, enforces STOP/timeout/marker/size checks, stores the Claude session ID and contract fingerprint, writes artifacts, and rejects review Git mutation. For a visible user session, pass `-ShowConversationViewer` to open a read-only Windows Terminal mirror containing only the request body, Claude text deltas, and completion state. The completed viewer stays open until the user presses Enter by default; pass a positive `-ViewerHoldSeconds` only when timed closing is explicitly wanted. During bounded waits, read only the newly appended text from `turn-<id>.live.md` and relay short, nonduplicated excerpts to the user; do not paste raw stream JSON or treat partial text as final.
 
 ### 6. Continue a multi-turn session
 

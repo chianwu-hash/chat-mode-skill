@@ -22,6 +22,7 @@ This is durable context, not protocol source of truth. Runtime authority lives i
 - Store Claude's session ID and use `--resume` for later turns.
 - Resume requires an unchanged SHA-256 fingerprint of stable authority fields. Turn text, deadline, response cap, and marker may change.
 - STOP and timeout terminate the child process tree. Validate JSON, response size, session ID, and exact trailing marker.
+- Claude stdout uses official partial-message `stream-json`; parsed text deltas append to a non-authoritative `live.md`, while only the final result can complete a turn.
 - Git baselines and isolated-worktree inspection remain mandatory because CLI permission rules are not an OS sandbox.
 - CLI review prevents writes but does not confine Read/Glob/Grep to the repository. Disclose that Claude may read any file accessible to the current account.
 - Request-path session segments must exactly match frontmatter `session_id`; flow-style and block-style YAML lists are both parsed.
@@ -38,6 +39,8 @@ This is durable context, not protocol source of truth. Runtime authority lives i
 - 2026-08-17: Claude Code updated from 2.1.71 to 2.1.233.
 - A real Pro OAuth one-turn MVP completed in 8.24 seconds with project/local settings excluded.
 - A real two-turn session reused one Claude session ID and recalled a nonce; turns completed in 9.86 and 5.69 seconds.
+- A real streaming MVP produced 99 partial/final events and exposed 4,501 bytes of Claude text before completion; the final live and response artifacts both reached 8,329 bytes with unchanged Git state.
+- Windows Terminal viewer launch requires `wt -w -1 new-tab`; both `new-window` and `-w new` failed on this installation. The user visibly confirmed the corrected replay, and a real turn streamed 108 events before completing with the window configured to wait for Enter.
 - The fake-worker supervisor smoke test verifies first turn, resume, stable session identity, changed-contract rejection, timeout, session-path mismatch, flow-style lists, malformed output, missing markers, Claude errors, artifacts, and unchanged Git state.
 - Earlier Desktop evidence remains in the `docs/smoke-test-2026-08-08*.md` family.
 

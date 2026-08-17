@@ -90,6 +90,7 @@ param(
     [Alias('allowedTools')][string]$AllowedToolList,
     [Alias('max-turns')][int]$MaxTurns,
     [Alias('output-format')][string]$OutputFormat,
+    [Alias('include-partial-messages')][switch]$IncludePartialMessages,
     [string]$Resume
 )
 
@@ -138,6 +139,16 @@ if ($Print) {
         throw 'Inline authorized command was not exposed as an allowed Bash rule.'
     }
     [pscustomobject]@{
+        type = 'stream_event'
+        event = @{
+            type = 'content_block_delta'
+            delta = @{ type = 'text_delta'; text = $result }
+        }
+        session_id = $sessionId
+    } | ConvertTo-Json -Compress -Depth 8
+    [pscustomobject]@{
+        type = 'result'
+        subtype = if ($isError) { 'error' } else { 'success' }
         is_error = $isError
         result = $result
         session_id = $sessionId
@@ -297,8 +308,15 @@ throw 'Unexpected fake Claude arguments.'
 
     $response1 = Join-Path $fixture ".chat-mode\sessions\$sessionId\turn-0001.response.md"
     $response2 = Join-Path $fixture ".chat-mode\sessions\$sessionId\turn-0002.response.md"
-    if (-not (Test-Path -LiteralPath $response1) -or -not (Test-Path -LiteralPath $response2)) {
+    $live1 = Join-Path $fixture ".chat-mode\sessions\$sessionId\turn-0001.live.md"
+    if (-not (Test-Path -LiteralPath $response1) -or
+        -not (Test-Path -LiteralPath $response2) -or
+        -not (Test-Path -LiteralPath $live1)) {
         throw 'Expected response artifacts were not written.'
+    }
+    $liveText = Get-Content -LiteralPath $live1 -Raw -Encoding UTF8
+    if ($liveText -notmatch 'fake response' -or $liveText -notmatch 'CLI_SMOKE_TURN_1_DONE') {
+        throw 'Live response artifact did not contain streamed text deltas.'
     }
 
     $status = (& git -C $fixture status --porcelain=v1 --untracked-files=all) -join "`n"
@@ -318,6 +336,7 @@ throw 'Unexpected fake Claude arguments.'
         MalformedResponseRejected = $true
         MissingMarkerRejected = $true
         ClaudeErrorRejected = $true
+        LiveArtifactWritten = $true
         GitStatusClean = $true
     } | ConvertTo-Json -Depth 4
 }

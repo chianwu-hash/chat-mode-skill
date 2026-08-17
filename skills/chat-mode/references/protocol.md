@@ -27,6 +27,7 @@ The transport never defines authority. The request envelope, selected working tr
     <session-id>.md
     <session-id>/
       claude-cli-state.json
+      turn-0001.live.md
       turn-0001.response.md
       turn-0001.run.json
     <session-id>.direct-main.json
@@ -157,7 +158,7 @@ The first successful turn stores the returned Claude session ID. A later turn ma
 4. Write the request atomically under the selected tree.
 5. Run supervisor `-Action Status`; require Claude Code 2.1.233+ and `claude.ai` subscription auth with no API credential variables.
 6. Invoke the first turn without `-Resume`, or a later unchanged-contract turn with `-Resume`.
-7. Enforce timeout, STOP, internal-turn, JSON, size, and trailing-marker requirements.
+7. Parse partial stream events into a non-authoritative live artifact while enforcing timeout and STOP; require a valid final result event, size limit, and trailing marker.
 8. Record state, run, response, transcript, and Git snapshots.
 9. For review, reject any new Git state relative to baseline.
 10. For isolated implementation, freeze Claude and run the worktree inspector; require scope/diff/main checks and reproduce tests.
@@ -185,6 +186,7 @@ A CLI turn completes only when:
 
 - Claude process succeeds and returns JSON with `is_error: false`;
 - result is nonempty, within limit, and ends with the exact marker;
+- partial output was treated as non-authoritative and the live artifact stayed within its soft cap;
 - Claude session ID is present and stable on resume;
 - review Git snapshots match;
 - response, run, state, and transcript artifacts are written;

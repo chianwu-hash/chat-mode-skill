@@ -2,6 +2,43 @@
 
 This file records significant chat-mode-skill changes for future AI handoff. It is not a full transcript.
 
+## 2026-08-17 Prove visible conversation viewer
+
+Status: completed
+Changed by: Codex
+Related task: Show the Codex-to-Claude conversation in a temporary terminal-like window
+
+Summary:
+
+- Added an opt-in, read-only Windows Terminal viewer that shows the request body, Claude text deltas, and turn completion without raw JSON or process logs.
+- Reused the existing request, live Markdown, and run artifacts; the viewer receives no Claude tools or repository authority.
+- Added `-ShowConversationViewer`; after completion the window waits for Enter by default, with an optional positive `-ViewerHoldSeconds` for timed closing.
+
+Real evidence:
+
+- The first launch attempt exposed an invalid Windows Terminal command: `new-window` was treated as the executable and failed with `0x80070002`. Supervisor completion alone did not prove viewer success.
+- A second `-w new` attempt opened Windows Terminal help instead of the viewer. The corrected route is `wt -w -1 new-tab`.
+- The user visibly confirmed the corrected saved-transcript replay. A subsequent real Pro OAuth review turn opened the viewer, streamed 108 events, and completed in 29.486 seconds with `viewerHoldSeconds: 0` and identical Git state.
+
+## 2026-08-17 Prove live Claude response streaming
+
+Status: completed
+Changed by: Codex
+Related task: Remove the black-box wait during supervised Claude CLI turns
+
+Summary:
+
+- Switched the prototype supervisor to Anthropic's official `stream-json` output with verbose partial messages.
+- Parsed text-delta events incrementally into ignored `turn-<id>.live.md` artifacts while retaining the final result as the only authoritative response.
+- Preserved STOP/timeout process control, marker and response-size checks, session resume/fingerprint checks, durable final artifacts, and review Git comparison.
+- Extended the fake-worker smoke test to verify live artifact creation.
+
+Real evidence:
+
+- Turn 1 completed with 119 stream events and matching 3,200-byte live/final responses.
+- A resumed Turn 2 exposed 4,501 bytes of actual Claude text before its run record existed, then completed with 99 events and matching 8,329-byte live/final responses.
+- Git status before and after both real review turns was identical.
+
 ## 2026-08-17 Restore supervised Claude CLI transport
 
 Status: completed

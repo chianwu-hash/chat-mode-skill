@@ -15,6 +15,10 @@ param(
 
     [int]$MaxAgentTurns = 12,
 
+    [switch]$ShowConversationViewer,
+
+    [int]$ViewerHoldSeconds = 0,
+
     [string]$ClaudeExe = 'claude',
 
     [string[]]$ClaudeArgsPrefix = @()
@@ -32,7 +36,9 @@ function New-ProcessResult {
         [string]$Stdout,
         [string]$Stderr,
         [double]$ElapsedSeconds,
-        [string]$StopReason
+        [string]$StopReason,
+        [int]$StreamEventCount = 0,
+        [int]$LiveBytes = 0
     )
 
     [pscustomobject]@{
@@ -41,7 +47,51 @@ function New-ProcessResult {
         Stderr = $Stderr
         ElapsedSeconds = $ElapsedSeconds
         StopReason = $StopReason
+        StreamEventCount = $StreamEventCount
+        LiveBytes = $LiveBytes
     }
+}
+
+function Add-StreamingLine {
+    param(
+        [System.Collections.IDictionary]$State,
+        [string]$Line,
+        [string]$LivePath,
+        [int]$LiveByteLimit
+    )
+
+    [void]$State.Stdout.AppendLine($Line)
+    $State.StreamEventCount++
+
+    try {
+        $streamEvent = $Line | ConvertFrom-Json
+    }
+    catch {
+        return
+    }
+
+    if ($streamEvent.type -ne 'stream_event' -or
+        $streamEvent.event.type -ne 'content_block_delta' -or
+        $streamEvent.event.delta.type -ne 'text_delta') {
+        return
+    }
+
+    $delta = [string]$streamEvent.event.delta.text
+    if ([string]::IsNullOrEmpty($delta) -or $State.LiveTruncated) {
+        return
+    }
+
+    $deltaBytes = $utf8NoBom.GetByteCount($delta)
+    if ($State.LiveBytes + $deltaBytes -gt $LiveByteLimit) {
+        $notice = "`n`n[live output truncated; final response validation continues]`n"
+        [System.IO.File]::AppendAllText($LivePath, $notice, $utf8NoBom)
+        $State.LiveBytes += $utf8NoBom.GetByteCount($notice)
+        $State.LiveTruncated = $true
+        return
+    }
+
+    [System.IO.File]::AppendAllText($LivePath, $delta, $utf8NoBom)
+    $State.LiveBytes += $deltaBytes
 }
 
 function Invoke-CapturedProcess {
@@ -49,7 +99,10 @@ function Invoke-CapturedProcess {
         [string]$FileName,
         [string[]]$Arguments,
         [int]$DeadlineSeconds,
-        [string]$StopFile = ''
+        [string]$StopFile = '',
+        [switch]$StreamJson,
+        [string]$LivePath = '',
+        [int]$LiveByteLimit = 50000
     )
 
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
@@ -58,6 +111,8 @@ function Invoke-CapturedProcess {
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = $utf8NoBom
+    $startInfo.StandardErrorEncoding = $utf8NoBom
     $startInfo.WorkingDirectory = $script:WorkingTreePath
 
     foreach ($argument in $Arguments) {
@@ -72,11 +127,35 @@ function Invoke-CapturedProcess {
         throw "Failed to start process: $FileName"
     }
 
-    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stdoutTask = $null
+    $lineTask = $null
+    $streamState = [ordered]@{
+        Stdout = [System.Text.StringBuilder]::new()
+        StreamEventCount = 0
+        LiveBytes = 0
+        LiveTruncated = $false
+    }
+    if ($StreamJson) {
+        $lineTask = $process.StandardOutput.ReadLineAsync()
+    }
+    else {
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    }
     $stderrTask = $process.StandardError.ReadToEndAsync()
     $stopReason = ''
 
     while (-not $process.HasExited) {
+        if ($StreamJson -and $null -ne $lineTask -and $lineTask.IsCompleted) {
+            $line = $lineTask.GetAwaiter().GetResult()
+            if ($null -eq $line) {
+                $lineTask = $null
+            }
+            else {
+                Add-StreamingLine -State $streamState -Line $line -LivePath $LivePath -LiveByteLimit $LiveByteLimit
+                $lineTask = $process.StandardOutput.ReadLineAsync()
+            }
+        }
+
         if (-not [string]::IsNullOrWhiteSpace($StopFile) -and (Test-Path -LiteralPath $StopFile)) {
             $stopReason = 'user_stop'
             try { $process.Kill($true) } catch {}
@@ -89,12 +168,24 @@ function Invoke-CapturedProcess {
             break
         }
 
-        Start-Sleep -Milliseconds 200
+        Start-Sleep -Milliseconds 50
     }
 
     $process.WaitForExit()
+    if ($StreamJson) {
+        while ($null -ne $lineTask) {
+            $line = $lineTask.GetAwaiter().GetResult()
+            if ($null -eq $line) {
+                $lineTask = $null
+            }
+            else {
+                Add-StreamingLine -State $streamState -Line $line -LivePath $LivePath -LiveByteLimit $LiveByteLimit
+                $lineTask = $process.StandardOutput.ReadLineAsync()
+            }
+        }
+    }
     $timer.Stop()
-    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stdout = if ($StreamJson) { $streamState.Stdout.ToString() } else { $stdoutTask.GetAwaiter().GetResult() }
     $stderr = $stderrTask.GetAwaiter().GetResult()
 
     New-ProcessResult `
@@ -102,7 +193,9 @@ function Invoke-CapturedProcess {
         -Stdout $stdout `
         -Stderr $stderr `
         -ElapsedSeconds $timer.Elapsed.TotalSeconds `
-        -StopReason $stopReason
+        -StopReason $stopReason `
+        -StreamEventCount $streamState.StreamEventCount `
+        -LiveBytes $streamState.LiveBytes
 }
 
 function Get-ClaudeArguments {
@@ -383,6 +476,44 @@ function Append-Utf8File {
     [System.IO.File]::AppendAllText($Path, $Content, $utf8NoBom)
 }
 
+function Start-ConversationViewer {
+    param(
+        [string]$Request,
+        [string]$Live,
+        [string]$Run,
+        [int]$HoldSeconds
+    )
+
+    $terminal = Get-Command wt.exe -ErrorAction Stop
+    $powerShell = (Get-Command pwsh -ErrorAction Stop).Source
+    $viewer = Join-Path $PSScriptRoot 'chat-mode-viewer.ps1'
+    if (-not (Test-Path -LiteralPath $viewer -PathType Leaf)) {
+        throw "Conversation viewer not found: $viewer"
+    }
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $terminal.Source
+    $startInfo.UseShellExecute = $true
+    foreach ($argument in @(
+        '-w', '-1',
+        'new-tab',
+        '--title', 'Chat Mode - Codex and Claude',
+        '--suppressApplicationTitle',
+        $powerShell,
+        '-NoProfile',
+        '-File', $viewer,
+        '-RequestPath', $Request,
+        '-LivePath', $Live,
+        '-RunPath', $Run,
+        '-ParentProcessId', $PID.ToString(),
+        '-HoldSeconds', $HoldSeconds.ToString()
+    )) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+
+    [void][System.Diagnostics.Process]::Start($startInfo)
+}
+
 $script:WorkingTreePath = [System.IO.Path]::GetFullPath($WorkingTree)
 $script:EffectiveClaudeArgsPrefix = @($ClaudeArgsPrefix)
 $command = Get-Command $ClaudeExe -ErrorAction Stop
@@ -415,6 +546,9 @@ if ($Action -eq 'Status') {
 
 if ($TimeoutSeconds -le 0 -or $MaxResponseBytes -le 0 -or $MaxAgentTurns -le 0) {
     throw 'TimeoutSeconds, MaxResponseBytes, and MaxAgentTurns must be positive.'
+}
+if ($ViewerHoldSeconds -lt 0) {
+    throw 'ViewerHoldSeconds must not be negative.'
 }
 if ([string]::IsNullOrWhiteSpace($RequestPath)) {
     throw 'RequestPath is required for Invoke.'
@@ -463,6 +597,7 @@ $sessionDirectory = Join-Path $script:WorkingTreePath ".chat-mode\sessions\$sess
 $statePath = Join-Path $sessionDirectory 'claude-cli-state.json'
 $runPath = Join-Path $sessionDirectory "turn-$turnId.run.json"
 $responsePath = Join-Path $sessionDirectory "turn-$turnId.response.md"
+$livePath = Join-Path $sessionDirectory "turn-$turnId.live.md"
 $transcriptPath = Join-Path $script:WorkingTreePath ".chat-mode\sessions\$sessionId.md"
 
 $claudeSessionId = ''
@@ -513,32 +648,53 @@ $claudeArguments = @(
     '--tools', ($tools -join ','),
     '--allowedTools', ($allowedTools -join ','),
     '--max-turns', $MaxAgentTurns.ToString(),
-    '--output-format', 'json'
+    '--output-format', 'stream-json',
+    '--verbose',
+    '--include-partial-messages'
 )
 if ($Resume) {
     $claudeArguments += @('--resume', $claudeSessionId)
 }
 $claudeArguments += $prompt
 
+Write-Utf8File -Path $livePath -Content ''
+if ($ShowConversationViewer) {
+    Start-ConversationViewer `
+        -Request $requestFullPath `
+        -Live $livePath `
+        -Run $runPath `
+        -HoldSeconds $ViewerHoldSeconds
+}
+
 $processResult = Invoke-CapturedProcess `
     -FileName $script:ClaudePath `
     -Arguments (Get-ClaudeArguments $claudeArguments) `
     -DeadlineSeconds $TimeoutSeconds `
-    -StopFile $stopFile
+    -StopFile $stopFile `
+    -StreamJson `
+    -LivePath $livePath `
+    -LiveByteLimit $MaxResponseBytes
 
 if (-not [string]::IsNullOrWhiteSpace($processResult.StopReason)) {
     throw "$($processResult.StopReason): Claude CLI process stopped."
 }
 
-try {
-    $claudeResult = $processResult.Stdout | ConvertFrom-Json
-}
-catch {
-    throw "malformed_response: Claude output was not JSON. stderr=$($processResult.Stderr.Trim())"
+$claudeResult = $null
+foreach ($streamLine in ($processResult.Stdout -split "`r?`n")) {
+    if ([string]::IsNullOrWhiteSpace($streamLine)) { continue }
+    try {
+        $streamObject = $streamLine | ConvertFrom-Json
+    }
+    catch {
+        throw "malformed_response: Claude stream contained invalid JSON. stderr=$($processResult.Stderr.Trim())"
+    }
+    if ($streamObject.type -eq 'result') {
+        $claudeResult = $streamObject
+    }
 }
 
 if ($null -eq $claudeResult -or $claudeResult.PSObject.Properties.Name -notcontains 'result') {
-    throw "malformed_response: Claude JSON result field is missing. stderr=$($processResult.Stderr.Trim())"
+    throw "malformed_response: Claude stream result event is missing. stderr=$($processResult.Stderr.Trim())"
 }
 
 if ($processResult.ExitCode -ne 0 -or $claudeResult.is_error) {
@@ -599,8 +755,13 @@ $runRecord = [ordered]@{
     contractFingerprint = $fingerprint
     requestPath = $normalizedRequest
     responsePath = [System.IO.Path]::GetRelativePath($script:WorkingTreePath, $responsePath).Replace('\', '/')
+    livePath = [System.IO.Path]::GetRelativePath($script:WorkingTreePath, $livePath).Replace('\', '/')
     elapsedSeconds = [math]::Round($processResult.ElapsedSeconds, 3)
     responseBytes = $responseBytes
+    liveBytes = $processResult.LiveBytes
+    streamEventCount = $processResult.StreamEventCount
+    conversationViewer = [bool]$ShowConversationViewer
+    viewerHoldSeconds = $ViewerHoldSeconds
     exitCode = $processResult.ExitCode
     stopReason = 'completed'
     gitBefore = $gitBefore

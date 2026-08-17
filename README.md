@@ -54,6 +54,10 @@ pwsh -NoProfile -File .\skills\chat-mode\scripts\claude-cli-supervisor.ps1 `
 
 For a later turn with memory, create the next request and add `-Resume`. State lives in ignored `.chat-mode/sessions/<session-id>/claude-cli-state.json`. A changed path, branch, base commit, scope, command, or authority field cannot silently inherit the old context.
 
+While Claude runs, partial assistant text is written incrementally to `turn-<id>.live.md`. Codex can relay new excerpts during bounded waits; the final `response.md` remains authoritative only after marker, session, size, process, and Git checks pass.
+
+Add `-ShowConversationViewer` to open a separate, read-only Windows Terminal mirror. It shows the Codex request first, appends Claude text while it is generated, and stays open after completion until you press Enter. Use a positive `-ViewerHoldSeconds` only when an automatic close is wanted.
+
 ## Safety and handback
 
 - Codex owns orchestration and Git integration; Claude must not start another agent loop.
