@@ -10,6 +10,8 @@
 
 Use this access profile when the user explicitly asks Claude to perform machine-level setup, such as installing a Claude plugin, configuring a local tool, or validating a host integration. It is not the default review profile and it is not an implementation mode for project files.
 
+This mode uses Claude Desktop because it may require visible host state or user-handled secret entry. The CLI supervisor intentionally rejects it.
+
 ## Purpose and boundary
 
 - Let Claude execute a small, exact set of setup commands without repeated permission prompts.
@@ -29,6 +31,7 @@ Use an envelope such as:
 
 ```yaml
 mode: host-setup-delegated
+transport: desktop
 permission: host-setup
 authority: delegated
 approval_policy: bypass-host-setup

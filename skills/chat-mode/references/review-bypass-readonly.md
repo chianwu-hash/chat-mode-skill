@@ -1,104 +1,95 @@
-# Review Bypass Read-Only Mode
+# Review Read-Only Mode
 
 ## Contents
 
 - Purpose and boundary
-- Contract
-- Bypass lifecycle
+- CLI contract
 - Mutation check
+- Desktop fallback
 - Failure states
 
-Use this access profile by default for ordinary review/discussion. Claude Desktop runs in `Bypass permissions`, while the mailbox contract grants read-only project authority and Computer Use keeps the visible workspace and permission state auditable. Use `Manual` only when the user explicitly requests per-action approval, the workspace or Bypass state cannot be verified, or a failed/ambiguous session requires safe recovery.
+Use this profile for ordinary review and discussion. The default transport is the Claude CLI supervisor; guarded Claude Desktop Bypass is a fallback.
 
 ## Purpose and boundary
 
 - Keep Codex as the sole project writer.
-- Let Claude read, list, and search project files without permission prompts.
-- Allow only declared read-only inspection commands.
-- Enable guarded Bypass for review only after recording the baseline, even when the repository already has dirty files; dirty status is baseline evidence, not authority.
-- Record branch, HEAD, upstream state when available, and `git status --porcelain=v1 --untracked-files=all` before sending.
-- Treat any new project mutation relative to the recorded baseline as a contract violation.
-- Leave guarded Bypass enabled after a successful ordinary review once the mutation check passes.
-- Restore `Manual` only on a failed or ambiguous review, an unverifiable workspace/permission state, or when the user explicitly requests per-action approval.
+- Let Claude read, list, and search project files without shell or write tools.
+- Record branch, HEAD, upstream, and `git status --porcelain=v1 --untracked-files=all` before the turn.
+- Allow a pre-existing dirty baseline but reject any new Git state.
+- Keep network, credentials, deployment, destructive commands, and external paths disabled unless the user's research request explicitly lists allowed public hosts.
 
-`Bypass permissions` is an application capability, not a read-only sandbox. The read-only boundary comes from the request contract, baseline status, and post-turn mutation inspection.
+## Confidentiality boundary
 
-## Contract
+CLI review is mutation-resistant, not path-confined. `Read`, `Glob`, and `Grep` may read any file accessible to the current Windows account, including paths outside `repo_root`. Git comparison detects repository mutation but cannot prevent or detect disclosure from unrelated paths.
 
-Use an envelope such as:
+Disclose this residual risk once before the first review turn. Do not start the worker when the account can access unrelated secrets or sensitive files that the user has not accepted exposing to Claude. Stronger confinement requires a separate OS boundary such as a restricted account, container, or sandbox; do not imply the current supervisor provides one.
+
+## CLI contract
+
+Use:
 
 ```yaml
+transport: claude-cli
 mode: review
 permission: read-only
 authority: delegated
-approval_policy: bypass-default
-edit_mode: bypass-permissions
+approval_policy: cli-supervised
+edit_mode: dont-ask
 repo_root: <absolute-repo>
 repo_branch: <current-branch>
 repo_head: <sha>
+repo_upstream: <ref-or-empty>
+repo_upstream_head: <sha-or-empty>
+baseline_status: <empty-or-literal-block>
 write_scope: []
 authorized_actions:
   - read-project
   - list-and-search-project
-  - inspect-git-state
-authorized_commands:
-  - <exact-or-bounded-read-only-command>
+authorized_commands: []
 git_authority: read-only
-network_authority: <none-or-explicit-allowed-public-hosts>
+network_authority: <none-or-explicit-public-hosts>
 credential_authority: none
 deployment_authority: none
 external_paths: []
 ```
 
-Explicitly forbid file creation or modification, Git mutation, destructive commands, credentials, deployment, and undeclared paths or network access. Default network authority to `none`; when the user's task explicitly requires public-web research, list the allowed public hosts in the request. Claude must respond in chat; do not authorize a response file.
+Do not put Git commands in `authorized_commands`; the supervisor captures Git state outside Claude. Review workers receive Read, Glob, and Grep only. They cannot use Bash, Edit, Write, browser, MCP, project skills, or project/local `CLAUDE.md`.
 
-## Bypass lifecycle
-
-After writing the ignored mailbox request, capture the current baseline and enable Bypass through the guarded action:
-
-```powershell
-pwsh -NoProfile -File .\skills\chat-mode\scripts\claude-desktop-uia.ps1 `
-  -Action EnableBypass `
-  -BypassContract 'review-readonly'
-```
-
-The helper accepts an already-enabled Bypass state or verifies the fixed warning and confirmation controls before enabling it. Keep the review contract read-only even though the application mode exposes broader capability.
-
-After a successful review, first complete the mutation check, then leave guarded Bypass enabled as the ordinary review default. Restore `Manual` only for the documented exception states.
-
-On failure, ambiguity, or an explicit user request for Manual, restore Manual:
-
-```powershell
-pwsh -NoProfile -File .\skills\chat-mode\scripts\claude-desktop-uia.ps1 `
-  -Action DisableBypass
-```
+Run the supervisor as described in [claude-cli.md](claude-cli.md). The supervisor writes response and transcript artifacts under ignored `.chat-mode/`; Claude remains project-read-only.
 
 ## Mutation check
 
-Before sending, record:
+The supervisor captures Git before and after the Claude process. It rejects changes to:
 
-- the clean `git status --porcelain=v1 --untracked-files=all` result;
-- branch and `HEAD`;
-- upstream ref and remote-tracking commit when configured.
+- tracked or untracked status;
+- branch or HEAD;
+- upstream ref or remote-tracking commit.
 
-After every Claude turn, verify:
+After the run, Codex independently verifies the same fields against the request baseline. Ignored `.chat-mode/` artifacts are orchestration state, not project mutation.
 
-- tracked and untracked project status matches the recorded baseline except for ignored `.chat-mode/` orchestration files;
-- branch and `HEAD` are unchanged;
-- no commit was created;
-- upstream state is unchanged;
-- Claude's operation log contains only authorized reads and inspections.
+The Git status check does not see arbitrary writes into other ignored paths. Review mode therefore withholds all write and shell tools; do not treat Git comparison alone as containment, and do not treat tool selection as read-path confinement.
 
-Ignored `.chat-mode/` request and transcript files are orchestration state, not project mutation.
+## Desktop fallback
+
+Use Desktop only when the user requests visibility or the CLI is unavailable after bounded recovery. Set:
+
+```yaml
+transport: desktop
+approval_policy: bypass-default
+edit_mode: bypass-permissions
+```
+
+Record the same baseline and authority. Enable guarded `review-readonly` Bypass through Computer Use or the exact UIA helper. Bypass is application behavior, not write authority. After a successful unchanged review, it may remain enabled; restore Manual on failure, ambiguity, mutation, or user request.
 
 ## Failure states
 
-Stop and restore Manual when:
+Stop when:
 
-- the baseline cannot be recorded or compared;
-- Claude creates, modifies, deletes, renames, stages, or commits a project file;
-- Claude runs an undeclared or mutating command;
-- Claude accesses credentials, deployment targets, external paths, nested repositories, submodules, or network hosts without explicit authority;
-- the Bypass dialog or mode state is ambiguous;
-- the completion marker is missing or malformed;
+- version or subscription authentication is unavailable;
+- API credential variables are present;
+- the request contract or resume fingerprint changes;
+- Claude output is empty, oversized, malformed, or missing its trailing marker;
+- Claude attempts a tool outside Read, Glob, and Grep;
+- project Git state changes;
+- Claude accesses credentials, deployment targets, undeclared paths, or undeclared network hosts;
 - `.chat-mode/STOP` exists.

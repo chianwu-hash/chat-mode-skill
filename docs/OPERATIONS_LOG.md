@@ -2,6 +2,32 @@
 
 This file records significant chat-mode-skill changes for future AI handoff. It is not a full transcript.
 
+## 2026-08-17 Restore supervised Claude CLI transport
+
+Status: completed
+Changed by: Codex
+Related task: Replace fragile Claude Desktop sending with a proven subscription-authenticated `claude -p` path
+
+Summary:
+
+- Confirmed the pre-change `main` baseline was clean, committed, and synchronized with `origin/main` at `8ee63aa18b6429b0f70302cbd7ac30555ede3a61`.
+- Updated Claude Code from 2.1.71 to 2.1.233 and verified Claude Pro OAuth login without an Anthropic API key.
+- Added a CLI supervisor that enforces request envelopes, minimum version/auth checks, user-only settings, bounded tools, STOP/timeout termination, Git baselines, structured output, response caps, completion markers, and durable artifacts.
+- Added persistent multi-turn memory through Claude session IDs and `--resume`; resume is rejected when the stable authority-contract fingerprint changes.
+- Made CLI transport the default for review and isolated implementation. Retained Claude Desktop for host setup, direct-main-exclusive handoff, explicit visible sessions, and bounded fallback.
+
+Validation evidence:
+
+- Real one-turn Pro OAuth MVP: 8.24 seconds; project `CLAUDE.md` was not loaded.
+- Real resumed two-turn MVP: same session ID, nonce recalled, 9.86 and 5.69 seconds.
+- Real end-to-end supervisor turns: 20.36 seconds initially and 8.00 seconds resumed, with the same Claude session ID, unchanged contract fingerprint, and unchanged dirty Git baseline.
+- Fake-worker supervisor smoke passed first turn, resume, same-session, changed-contract rejection, response artifacts, and unchanged Git status.
+
+Important decision:
+
+- Use `--setting-sources user`, not `--bare`. Current `--bare` behavior does not use subscription OAuth and would require the API route the user rejected.
+- A two-turn independent Claude review endorsed the CLI-first direction after live evidence resolved its flag and npm-shim concerns. Before commit, Codex added exact request-path/session matching, flow-style list parsing, prominent host-wide read-risk disclosure, and negative-path smoke coverage.
+
 ## 2026-08-11 Reuse trusted projects for new Claude conversations
 
 Status: completed

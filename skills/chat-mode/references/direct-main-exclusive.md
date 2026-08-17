@@ -10,6 +10,8 @@
 
 Use this mode only when the user explicitly asks Claude to operate in the current main worktree without isolation or asks for equal task-level project access. It trades containment for shared project context.
 
+This mode uses Claude Desktop and a guarded exclusive handoff. The CLI supervisor intentionally rejects it.
+
 ## Invariants
 
 - Require a Git repository, clean main worktree, named branch, and baseline commit.
@@ -56,6 +58,7 @@ Use an envelope such as:
 
 ```yaml
 mode: direct-main-exclusive
+transport: desktop
 permission: direct-main-write
 authority: delegated
 approval_policy: bypass-explicit

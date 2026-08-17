@@ -1,8 +1,8 @@
 # Windows UI Automation Adapter
 
-## Role after Computer Use
+## Desktop fallback role
 
-Computer Use is the default way to operate Claude Desktop for chat-mode. It makes visible UI state explicit: current workspace, open menus, prompt text, Send/Stop state, and completion progress. Use this UIA adapter only as a secondary helper when exact accessible text or guarded prompt approval is clearly more reliable than visual control.
+Claude CLI is the default transport for review and isolated implementation. Use Claude Desktop for host setup, direct-main-exclusive handoff, explicit visible sessions, or bounded CLI recovery. Within Desktop transport, Computer Use is the primary visible controller; this UIA adapter is a secondary helper when exact accessible text or guarded prompt approval is more reliable.
 
 Do not use UIA to repair a visually stuck Claude UI. If workspace/model/mode menus, stale Bypass dialogs, or composer focus issues appear, switch to Computer Use, inspect the screenshot, and perform one visible correction.
 
@@ -69,7 +69,7 @@ pwsh -NoProfile -File $uia -Action Expand -NameRegex '^Accept edits$' -ControlTy
 pwsh -NoProfile -File $uia -Action Select -NameRegex '^Manual\b' -ControlType RadioButton
 ```
 
-For a review or discussion session, default to the read-only Bypass profile after recording the mailbox contract and repository baseline. Enable it with one guarded action:
+For a Desktop fallback review or discussion session, use the read-only Bypass profile after recording the mailbox contract and repository baseline. Enable it with one guarded action:
 
 ```powershell
 pwsh -NoProfile -File $uia `

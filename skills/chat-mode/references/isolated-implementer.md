@@ -16,7 +16,7 @@ Use this mode only when the user explicitly asks Claude to create or modify many
 - Let Claude write only inside the isolated worktree.
 - Do not let Codex edit tracked files in that worktree while Claude owns the turn.
 - Do not let Claude access or modify the main worktree, manage worktrees, switch branches, commit, push, or invoke another agent.
-- Let Codex handle contract-matching trust and permission dialogs; reserve user escalation for expanded or materially riskier authority.
+- Let the CLI supervisor expose only the declared edit and validation tools; reserve user escalation for expanded or materially riskier authority.
 - Bind delegated authority to one exact worktree, branch, base commit, `write_scope`, and authorized action and command set.
 - Do not integrate changes merely because Claude produced a completion marker.
 
@@ -58,15 +58,13 @@ After preparation, record and report:
 - branch and base commit;
 - declared `write_scope`;
 - authorized actions and validation commands;
-- that `Accept edits` is UI permission rather than an OS path sandbox.
+- that CLI permission mode and tool rules are not an OS path sandbox.
 
-The user's implementation request delegates ordinary project-local reads, in-scope writes, and necessary validation already implied by the task. Do not request a second confirmation for that same authority. Use Computer Use to visibly set the isolated Claude session to `Accept edits`, or keep `Manual` when testing prompt approval or when the contract requires per-action review. Use UIA only when the visible state is already clear and the exact control match is stable.
+The user's implementation request delegates ordinary project-local reads, in-scope writes, and necessary validation already implied by the task. Do not request a second confirmation for that same authority. Use `claude-cli-supervisor.ps1` with this isolated worktree and request. The supervisor enables Edit and Write, and enables Bash only for exact `authorized_commands`.
 
 Delegation expires when the session ends. Re-evaluate any change to the worktree, branch, base commit, scope, action set, or command set. Ask the user only when the change expands the original request or materially changes its risk.
 
-Keep `Manual` instead when the user requests per-edit approval, secrets or production credentials are present, or the isolated worktree is not an adequate risk boundary.
-
-Codex may approve a Claude prompt only after visible or accessible text identifies an exact contract-matching action. Examples include an in-scope file write or a declared test command. Prefer Computer Use for visible prompt approval; use the guarded UIA helper only when exact accessible text is stable and uniquely matches the contract.
+Use Claude Desktop instead only when the user requests a visible session or the CLI is unavailable after bounded recovery. Keep Desktop `Manual` when the user requests per-edit approval, secrets or production credentials are present, or the isolated worktree is not an adequate risk boundary.
 
 Do not approve:
 
@@ -91,7 +89,9 @@ Use these envelope fields:
 mode: isolated-implementer
 permission: isolated-write
 authority: delegated
-approval_policy: contract-matched
+transport: claude-cli
+approval_policy: cli-supervised
+edit_mode: accept-edits
 main_repo: <absolute-main-repo>
 worktree_path: <absolute-isolated-worktree>
 worktree_branch: chat-mode/claude-<session-id>
@@ -115,9 +115,9 @@ Tell Claude:
 - run only the tests and build commands listed in the request;
 - report changed files, commands, test results, unresolved risks, and the exact completion marker.
 
-Open Claude Desktop Code with `folder=<worktree_path>`. If a new trust dialog appears, approve it only when its accessible path exactly matches `worktree_path`; otherwise stop.
+Invoke the CLI supervisor with `WorkingTree=<worktree_path>` and this request path. Project/local Claude settings are excluded. The supervisor writes response and run artifacts under the isolated worktree's ignored `.chat-mode/` directory.
 
-Use `Accept edits` under the delegated contract above. When Claude still prompts, let Codex approve only exact matches and stop on ambiguity or authority expansion.
+If Desktop fallback is necessary, open Claude Desktop Code with `folder=<worktree_path>`. Approve trust only when the accessible path exactly matches `worktree_path`, use `Accept edits` under the same contract, and stop on ambiguity or authority expansion.
 
 ## Handoff and inspection
 
@@ -142,7 +142,7 @@ Require:
 
 Codex then reviews the full diff. A completion marker means only that Claude stopped; it is not approval to integrate.
 
-Switch the Claude session back to `Manual` after the handoff is captured, including when inspection fails.
+For CLI transport, process exit freezes the worker automatically. For Desktop fallback, switch Claude back to `Manual` after handoff, including when inspection fails.
 
 ## Integration
 
@@ -169,4 +169,4 @@ Stop without integrating when:
 - tests fail or cannot be reproduced;
 - the diff contains unexplained generated files or secrets;
 - Claude commits, pushes, rewrites history, or modifies worktree metadata;
-- Claude UI state becomes ambiguous or the deadline expires.
+- Claude output/session state is malformed, Desktop fallback state is ambiguous, or the deadline expires.
