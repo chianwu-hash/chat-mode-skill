@@ -15,6 +15,11 @@ param(
 
     [int]$MaxAgentTurns = 12,
 
+    [ValidateSet('medium', 'high')]
+    [string]$ClaudeEffort = 'medium',
+
+    [int]$IdleWarningSeconds = 90,
+
     [switch]$ShowConversationViewer,
 
     [int]$ViewerHoldSeconds = 0,
@@ -38,7 +43,12 @@ function New-ProcessResult {
         [double]$ElapsedSeconds,
         [string]$StopReason,
         [int]$StreamEventCount = 0,
-        [int]$LiveBytes = 0
+        [int]$LiveBytes = 0,
+        [string]$LastEventAt = '',
+        [string]$LastEventKind = 'starting',
+        [int]$ReadToolUseCount = 0,
+        [string]$ProvisionalClaudeSessionId = '',
+        [bool]$MalformedLineSeen = $false
     )
 
     [pscustomobject]@{
@@ -49,7 +59,67 @@ function New-ProcessResult {
         StopReason = $StopReason
         StreamEventCount = $StreamEventCount
         LiveBytes = $LiveBytes
+        LastEventAt = $LastEventAt
+        LastEventKind = $LastEventKind
+        ReadToolUseCount = $ReadToolUseCount
+        ProvisionalClaudeSessionId = $ProvisionalClaudeSessionId
+        MalformedLineSeen = $MalformedLineSeen
     }
+}
+
+function Write-JsonAtomic {
+    param(
+        [string]$Path,
+        [System.Collections.IDictionary]$Record
+    )
+
+    $parent = Split-Path -Parent $Path
+    [void](New-Item -ItemType Directory -Force -Path $parent)
+    $temporary = Join-Path $parent ('.' + [System.IO.Path]::GetFileName($Path) + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        [System.IO.File]::WriteAllText($temporary, (($Record | ConvertTo-Json -Depth 10) + "`n"), $utf8NoBom)
+        [System.IO.File]::Move($temporary, $Path, $true)
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporary) {
+            Remove-Item -LiteralPath $temporary -Force
+        }
+    }
+}
+
+function Write-ActivityStatus {
+    param(
+        [System.Collections.IDictionary]$State,
+        [string]$StatusPath,
+        [string]$SessionId,
+        [string]$TurnId,
+        [string]$RunState,
+        [string]$Effort,
+        [int]$TimeoutSeconds,
+        [int]$IdleWarningSeconds,
+        [double]$ElapsedSeconds,
+        [string]$StopReason = ''
+    )
+
+    if ([string]::IsNullOrWhiteSpace($StatusPath)) { return }
+    $record = [ordered]@{
+        schemaVersion = 1
+        sessionId = $SessionId
+        turnId = $TurnId
+        state = $RunState
+        effort = $Effort
+        timeoutSeconds = $TimeoutSeconds
+        idleWarningSeconds = $IdleWarningSeconds
+        elapsedSeconds = [math]::Round($ElapsedSeconds, 3)
+        eventCount = $State.StreamEventCount
+        lastEventAt = $State.LastEventAt
+        lastEventKind = $State.LastEventKind
+        readToolUseCount = $State.ReadToolUseCount
+        hasProvisionalClaudeSessionId = -not [string]::IsNullOrWhiteSpace($State.ProvisionalClaudeSessionId)
+        stopReason = $StopReason
+        updatedAt = [DateTimeOffset]::UtcNow.ToString('o')
+    }
+    Write-JsonAtomic -Path $StatusPath -Record $record
 }
 
 function Add-StreamingLine {
@@ -57,18 +127,61 @@ function Add-StreamingLine {
         [System.Collections.IDictionary]$State,
         [string]$Line,
         [string]$LivePath,
-        [int]$LiveByteLimit
+        [int]$LiveByteLimit,
+        [string]$StatusPath,
+        [string]$SessionId,
+        [string]$TurnId,
+        [string]$Effort,
+        [int]$TimeoutSeconds,
+        [int]$IdleWarningSeconds,
+        [System.Diagnostics.Stopwatch]$Timer
     )
 
-    [void]$State.Stdout.AppendLine($Line)
     $State.StreamEventCount++
 
     try {
         $streamEvent = $Line | ConvertFrom-Json
     }
     catch {
+        $State.MalformedLineSeen = $true
         return
     }
+
+    $State.LastEventAt = [DateTimeOffset]::UtcNow.ToString('o')
+    $State.LastEventKind = 'model-active'
+    if ($streamEvent.PSObject.Properties.Name -contains 'session_id' -and
+        -not [string]::IsNullOrWhiteSpace([string]$streamEvent.session_id)) {
+        $State.ProvisionalClaudeSessionId = [string]$streamEvent.session_id
+    }
+    if ($streamEvent.type -eq 'result') {
+        $State.ResultLine = $Line
+        $State.LastEventKind = 'finalizing'
+    }
+    elseif ($streamEvent.type -eq 'stream_event') {
+        $eventType = [string]$streamEvent.event.type
+        if ($eventType -eq 'content_block_start' -and
+            $streamEvent.event.content_block.type -eq 'tool_use') {
+            $State.LastEventKind = 'tool-active'
+            if ($streamEvent.event.content_block.name -eq 'Read') {
+                $State.ReadToolUseCount++
+            }
+        }
+        elseif ($eventType -eq 'content_block_delta' -and
+            $streamEvent.event.delta.type -eq 'text_delta') {
+            $State.LastEventKind = 'responding'
+        }
+    }
+
+    Write-ActivityStatus `
+        -State $State `
+        -StatusPath $StatusPath `
+        -SessionId $SessionId `
+        -TurnId $TurnId `
+        -RunState 'running' `
+        -Effort $Effort `
+        -TimeoutSeconds $TimeoutSeconds `
+        -IdleWarningSeconds $IdleWarningSeconds `
+        -ElapsedSeconds $Timer.Elapsed.TotalSeconds
 
     if ($streamEvent.type -ne 'stream_event' -or
         $streamEvent.event.type -ne 'content_block_delta' -or
@@ -102,7 +215,12 @@ function Invoke-CapturedProcess {
         [string]$StopFile = '',
         [switch]$StreamJson,
         [string]$LivePath = '',
-        [int]$LiveByteLimit = 50000
+        [int]$LiveByteLimit = 50000,
+        [string]$StatusPath = '',
+        [string]$SessionId = '',
+        [string]$TurnId = '',
+        [string]$Effort = 'medium',
+        [int]$IdleWarningSeconds = 90
     )
 
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
@@ -130,10 +248,15 @@ function Invoke-CapturedProcess {
     $stdoutTask = $null
     $lineTask = $null
     $streamState = [ordered]@{
-        Stdout = [System.Text.StringBuilder]::new()
+        ResultLine = ''
+        MalformedLineSeen = $false
         StreamEventCount = 0
         LiveBytes = 0
         LiveTruncated = $false
+        LastEventAt = ''
+        LastEventKind = 'starting'
+        ReadToolUseCount = 0
+        ProvisionalClaudeSessionId = ''
     }
     if ($StreamJson) {
         $lineTask = $process.StandardOutput.ReadLineAsync()
@@ -151,7 +274,7 @@ function Invoke-CapturedProcess {
                 $lineTask = $null
             }
             else {
-                Add-StreamingLine -State $streamState -Line $line -LivePath $LivePath -LiveByteLimit $LiveByteLimit
+                Add-StreamingLine -State $streamState -Line $line -LivePath $LivePath -LiveByteLimit $LiveByteLimit -StatusPath $StatusPath -SessionId $SessionId -TurnId $TurnId -Effort $Effort -TimeoutSeconds $DeadlineSeconds -IdleWarningSeconds $IdleWarningSeconds -Timer $timer
                 $lineTask = $process.StandardOutput.ReadLineAsync()
             }
         }
@@ -179,13 +302,16 @@ function Invoke-CapturedProcess {
                 $lineTask = $null
             }
             else {
-                Add-StreamingLine -State $streamState -Line $line -LivePath $LivePath -LiveByteLimit $LiveByteLimit
+                Add-StreamingLine -State $streamState -Line $line -LivePath $LivePath -LiveByteLimit $LiveByteLimit -StatusPath $StatusPath -SessionId $SessionId -TurnId $TurnId -Effort $Effort -TimeoutSeconds $DeadlineSeconds -IdleWarningSeconds $IdleWarningSeconds -Timer $timer
                 $lineTask = $process.StandardOutput.ReadLineAsync()
             }
         }
     }
     $timer.Stop()
-    $stdout = if ($StreamJson) { $streamState.Stdout.ToString() } else { $stdoutTask.GetAwaiter().GetResult() }
+    $stdout = if ($StreamJson) { $streamState.ResultLine } else { $stdoutTask.GetAwaiter().GetResult() }
+    if ($StreamJson -and $streamState.MalformedLineSeen -and [string]::IsNullOrWhiteSpace($stdout)) {
+        $stdout = '__CHAT_MODE_MALFORMED_STREAM__'
+    }
     $stderr = $stderrTask.GetAwaiter().GetResult()
 
     New-ProcessResult `
@@ -195,7 +321,12 @@ function Invoke-CapturedProcess {
         -ElapsedSeconds $timer.Elapsed.TotalSeconds `
         -StopReason $stopReason `
         -StreamEventCount $streamState.StreamEventCount `
-        -LiveBytes $streamState.LiveBytes
+        -LiveBytes $streamState.LiveBytes `
+        -LastEventAt $streamState.LastEventAt `
+        -LastEventKind $streamState.LastEventKind `
+        -ReadToolUseCount $streamState.ReadToolUseCount `
+        -ProvisionalClaudeSessionId $streamState.ProvisionalClaudeSessionId `
+        -MalformedLineSeen $streamState.MalformedLineSeen
 }
 
 function Get-ClaudeArguments {
@@ -481,6 +612,7 @@ function Start-ConversationViewer {
         [string]$Request,
         [string]$Live,
         [string]$Run,
+        [string]$Status,
         [int]$HoldSeconds
     )
 
@@ -505,6 +637,7 @@ function Start-ConversationViewer {
         '-RequestPath', $Request,
         '-LivePath', $Live,
         '-RunPath', $Run,
+        '-StatusPath', $Status,
         '-ParentProcessId', $PID.ToString(),
         '-HoldSeconds', $HoldSeconds.ToString()
     )) {
@@ -544,8 +677,8 @@ if ($Action -eq 'Status') {
     exit 0
 }
 
-if ($TimeoutSeconds -le 0 -or $MaxResponseBytes -le 0 -or $MaxAgentTurns -le 0) {
-    throw 'TimeoutSeconds, MaxResponseBytes, and MaxAgentTurns must be positive.'
+if ($TimeoutSeconds -le 0 -or $MaxResponseBytes -le 0 -or $MaxAgentTurns -le 0 -or $IdleWarningSeconds -le 0) {
+    throw 'TimeoutSeconds, MaxResponseBytes, MaxAgentTurns, and IdleWarningSeconds must be positive.'
 }
 if ($ViewerHoldSeconds -lt 0) {
     throw 'ViewerHoldSeconds must not be negative.'
@@ -598,6 +731,7 @@ $statePath = Join-Path $sessionDirectory 'claude-cli-state.json'
 $runPath = Join-Path $sessionDirectory "turn-$turnId.run.json"
 $responsePath = Join-Path $sessionDirectory "turn-$turnId.response.md"
 $livePath = Join-Path $sessionDirectory "turn-$turnId.live.md"
+$statusPath = Join-Path $sessionDirectory "turn-$turnId.status.json"
 $transcriptPath = Join-Path $script:WorkingTreePath ".chat-mode\sessions\$sessionId.md"
 
 $claudeSessionId = ''
@@ -606,6 +740,9 @@ if ($Resume) {
         throw 'Cannot resume: Claude CLI session state is missing.'
     }
     $state = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($state.PSObject.Properties.Name -contains 'resumable' -and -not [bool]$state.resumable) {
+        throw 'Cannot resume: a prior turn did not complete; choose a new session_id.'
+    }
     if ($state.contractFingerprint -ne $fingerprint) {
         throw 'Cannot resume: request authority contract changed.'
     }
@@ -648,6 +785,7 @@ $claudeArguments = @(
     '--tools', ($tools -join ','),
     '--allowedTools', ($allowedTools -join ','),
     '--max-turns', $MaxAgentTurns.ToString(),
+    '--effort', $ClaudeEffort,
     '--output-format', 'stream-json',
     '--verbose',
     '--include-partial-messages'
@@ -658,11 +796,31 @@ if ($Resume) {
 $claudeArguments += $prompt
 
 Write-Utf8File -Path $livePath -Content ''
+$processResult = $null
+try {
+$initialActivity = [ordered]@{
+    StreamEventCount = 0
+    LastEventAt = ''
+    LastEventKind = 'starting'
+    ReadToolUseCount = 0
+    ProvisionalClaudeSessionId = ''
+}
+Write-ActivityStatus `
+    -State $initialActivity `
+    -StatusPath $statusPath `
+    -SessionId $sessionId `
+    -TurnId $turnId `
+    -RunState 'running' `
+    -Effort $ClaudeEffort `
+    -TimeoutSeconds $TimeoutSeconds `
+    -IdleWarningSeconds $IdleWarningSeconds `
+    -ElapsedSeconds 0
 if ($ShowConversationViewer) {
     Start-ConversationViewer `
         -Request $requestFullPath `
         -Live $livePath `
         -Run $runPath `
+        -Status $statusPath `
         -HoldSeconds $ViewerHoldSeconds
 }
 
@@ -673,10 +831,18 @@ $processResult = Invoke-CapturedProcess `
     -StopFile $stopFile `
     -StreamJson `
     -LivePath $livePath `
-    -LiveByteLimit $MaxResponseBytes
+    -LiveByteLimit $MaxResponseBytes `
+    -StatusPath $statusPath `
+    -SessionId $sessionId `
+    -TurnId $turnId `
+    -Effort $ClaudeEffort `
+    -IdleWarningSeconds $IdleWarningSeconds
 
 if (-not [string]::IsNullOrWhiteSpace($processResult.StopReason)) {
     throw "$($processResult.StopReason): Claude CLI process stopped."
+}
+if ($processResult.MalformedLineSeen) {
+    throw "malformed_response: Claude stream contained invalid JSON. stderr=$($processResult.Stderr.Trim())"
 }
 
 $claudeResult = $null
@@ -740,6 +906,7 @@ $stateRecord = [ordered]@{
     claudeVersion = $versionInfo.Version.ToString()
     authMethod = $authInfo.authMethod
     subscriptionType = $authInfo.subscriptionType
+    resumable = $true
     updatedAt = [DateTimeOffset]::UtcNow.ToString('o')
 }
 Write-Utf8File -Path $statePath -Content (($stateRecord | ConvertTo-Json -Depth 8) + "`n")
@@ -747,6 +914,7 @@ Write-Utf8File -Path $responsePath -Content ($response.TrimEnd() + "`n")
 
 $runRecord = [ordered]@{
     schemaVersion = 1
+    status = 'completed'
     sessionId = $sessionId
     turnId = $turnId
     mode = $mode
@@ -756,10 +924,17 @@ $runRecord = [ordered]@{
     requestPath = $normalizedRequest
     responsePath = [System.IO.Path]::GetRelativePath($script:WorkingTreePath, $responsePath).Replace('\', '/')
     livePath = [System.IO.Path]::GetRelativePath($script:WorkingTreePath, $livePath).Replace('\', '/')
+    statusPath = [System.IO.Path]::GetRelativePath($script:WorkingTreePath, $statusPath).Replace('\', '/')
     elapsedSeconds = [math]::Round($processResult.ElapsedSeconds, 3)
     responseBytes = $responseBytes
     liveBytes = $processResult.LiveBytes
     streamEventCount = $processResult.StreamEventCount
+    lastEventAt = $processResult.LastEventAt
+    lastEventKind = $processResult.LastEventKind
+    readToolUseCount = $processResult.ReadToolUseCount
+    effort = $ClaudeEffort
+    timeoutSeconds = $TimeoutSeconds
+    idleWarningSeconds = $IdleWarningSeconds
     conversationViewer = [bool]$ShowConversationViewer
     viewerHoldSeconds = $ViewerHoldSeconds
     exitCode = $processResult.ExitCode
@@ -769,6 +944,23 @@ $runRecord = [ordered]@{
     completedAt = [DateTimeOffset]::UtcNow.ToString('o')
 }
 Write-Utf8File -Path $runPath -Content (($runRecord | ConvertTo-Json -Depth 10) + "`n")
+Write-ActivityStatus `
+    -State ([ordered]@{
+        StreamEventCount = $processResult.StreamEventCount
+        LastEventAt = $processResult.LastEventAt
+        LastEventKind = $processResult.LastEventKind
+        ReadToolUseCount = $processResult.ReadToolUseCount
+        ProvisionalClaudeSessionId = $returnedSessionId
+    }) `
+    -StatusPath $statusPath `
+    -SessionId $sessionId `
+    -TurnId $turnId `
+    -RunState 'completed' `
+    -Effort $ClaudeEffort `
+    -TimeoutSeconds $TimeoutSeconds `
+    -IdleWarningSeconds $IdleWarningSeconds `
+    -ElapsedSeconds $processResult.ElapsedSeconds `
+    -StopReason 'completed'
 
 $transcriptEntry = @"
 
@@ -780,6 +972,7 @@ $transcriptEntry = @"
 - contract_fingerprint: $fingerprint
 - elapsed_seconds: $([math]::Round($processResult.ElapsedSeconds, 3))
 - response_bytes: $responseBytes
+- effort: $ClaudeEffort
 - stop_reason: completed
 
 $($response.TrimEnd())
@@ -787,3 +980,114 @@ $($response.TrimEnd())
 Append-Utf8File -Path $transcriptPath -Content $transcriptEntry
 
 $runRecord | ConvertTo-Json -Depth 10
+}
+catch {
+    $failureMessage = $_.Exception.Message
+    $failureReason = 'supervisor_error'
+    if ($failureMessage -match '^(?<reason>[a-z][a-z0-9_]*):') {
+        $failureReason = $Matches.reason
+    }
+
+    $failureGitAfter = $null
+    try { $failureGitAfter = Get-GitSnapshot -Root $script:WorkingTreePath } catch {}
+    if ($mode -eq 'review' -and $null -ne $failureGitAfter -and
+        -not (Test-SnapshotEqual -Before $gitBefore -After $failureGitAfter)) {
+        $failureReason = 'unexpected_mutation'
+        $failureMessage = 'unexpected_mutation: review mode changed Git state.'
+    }
+
+    if ($failureMessage.Length -gt 4000) {
+        $failureMessage = $failureMessage.Substring(0, 4000) + '...'
+    }
+    $elapsed = if ($null -ne $processResult) { $processResult.ElapsedSeconds } else { 0 }
+    $eventCount = if ($null -ne $processResult) { $processResult.StreamEventCount } else { 0 }
+    $liveBytes = if ($null -ne $processResult) { $processResult.LiveBytes } else { 0 }
+    $lastEventAt = if ($null -ne $processResult) { $processResult.LastEventAt } else { '' }
+    $lastEventKind = if ($null -ne $processResult) { $processResult.LastEventKind } else { 'starting' }
+    $readToolUseCount = if ($null -ne $processResult) { $processResult.ReadToolUseCount } else { 0 }
+    $provisionalSessionId = if ($null -ne $processResult) { $processResult.ProvisionalClaudeSessionId } else { $claudeSessionId }
+    $exitCode = if ($null -ne $processResult) { $processResult.ExitCode } else { -1 }
+
+    $invalidState = [ordered]@{
+        schemaVersion = 1
+        sessionId = $sessionId
+        claudeSessionId = $provisionalSessionId
+        claudeSessionIdValidated = $false
+        contractFingerprint = $fingerprint
+        mode = $mode
+        workingTree = $script:WorkingTreePath
+        resumable = $false
+        invalidatedBy = $failureReason
+        updatedAt = [DateTimeOffset]::UtcNow.ToString('o')
+    }
+    Write-Utf8File -Path $statePath -Content (($invalidState | ConvertTo-Json -Depth 8) + "`n")
+
+    $failureRecord = [ordered]@{
+        schemaVersion = 1
+        status = 'failed'
+        sessionId = $sessionId
+        turnId = $turnId
+        mode = $mode
+        resumed = [bool]$Resume
+        claudeSessionId = $provisionalSessionId
+        claudeSessionIdValidated = $false
+        contractFingerprint = $fingerprint
+        requestPath = $normalizedRequest
+        responsePath = $null
+        livePath = [System.IO.Path]::GetRelativePath($script:WorkingTreePath, $livePath).Replace('\', '/')
+        statusPath = [System.IO.Path]::GetRelativePath($script:WorkingTreePath, $statusPath).Replace('\', '/')
+        elapsedSeconds = [math]::Round($elapsed, 3)
+        responseBytes = 0
+        liveBytes = $liveBytes
+        streamEventCount = $eventCount
+        lastEventAt = $lastEventAt
+        lastEventKind = $lastEventKind
+        readToolUseCount = $readToolUseCount
+        effort = $ClaudeEffort
+        timeoutSeconds = $TimeoutSeconds
+        idleWarningSeconds = $IdleWarningSeconds
+        conversationViewer = [bool]$ShowConversationViewer
+        viewerHoldSeconds = $ViewerHoldSeconds
+        exitCode = $exitCode
+        stopReason = $failureReason
+        errorMessage = $failureMessage
+        gitBefore = $gitBefore
+        gitAfter = $failureGitAfter
+        stoppedAt = [DateTimeOffset]::UtcNow.ToString('o')
+    }
+    Write-Utf8File -Path $runPath -Content (($failureRecord | ConvertTo-Json -Depth 10) + "`n")
+
+    $viewerState = if ($failureReason -eq 'timeout') { 'stopped-timeout' } elseif ($failureReason -eq 'user_stop') { 'stopped-user' } else { 'failed' }
+    Write-ActivityStatus `
+        -State ([ordered]@{
+            StreamEventCount = $eventCount
+            LastEventAt = $lastEventAt
+            LastEventKind = $lastEventKind
+            ReadToolUseCount = $readToolUseCount
+            ProvisionalClaudeSessionId = $provisionalSessionId
+        }) `
+        -StatusPath $statusPath `
+        -SessionId $sessionId `
+        -TurnId $turnId `
+        -RunState $viewerState `
+        -Effort $ClaudeEffort `
+        -TimeoutSeconds $TimeoutSeconds `
+        -IdleWarningSeconds $IdleWarningSeconds `
+        -ElapsedSeconds $elapsed `
+        -StopReason $failureReason
+
+    $failureTranscript = @"
+
+## Turn $turnId - Claude CLI failure
+
+- mode: $mode
+- resumed: $([bool]$Resume)
+- effort: $ClaudeEffort
+- elapsed_seconds: $([math]::Round($elapsed, 3))
+- event_count: $eventCount
+- stop_reason: $failureReason
+- resumable: false
+"@
+    Append-Utf8File -Path $transcriptPath -Content $failureTranscript
+    throw
+}

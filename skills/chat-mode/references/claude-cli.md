@@ -44,14 +44,16 @@ pwsh -NoProfile -File .\skills\chat-mode\scripts\claude-cli-supervisor.ps1 `
   -WorkingTree '<absolute-working-tree>' `
   -RequestPath '<absolute-request-path>' `
   -TimeoutSeconds 300 `
+  -ClaudeEffort medium `
+  -IdleWarningSeconds 90 `
   -MaxResponseBytes 50000 `
   -MaxAgentTurns 12 `
   -ShowConversationViewer
 ```
 
-The supervisor launches one Claude CLI process, captures stderr, parses stdout as newline-delimited `stream-json`, polls `.chat-mode/STOP`, and kills the child process tree on STOP or timeout. It uses `--verbose --include-partial-messages` to append assistant text deltas to a live Markdown artifact. The final stream event must contain a nonempty `result`, `session_id`, and exact trailing marker.
+The supervisor launches one Claude CLI process, captures stderr, parses stdout as newline-delimited `stream-json`, polls `.chat-mode/STOP`, and kills the child process tree on STOP or timeout. Ordinary review uses `medium` effort with a 300-second ceiling. Explicit deep review uses `-ClaudeEffort high -TimeoutSeconds 600 -IdleWarningSeconds 150`. Idle warning thresholds affect status only; they never kill the process. The supervisor retains only the final result line in memory, appends assistant text deltas to `live.md`, and records sanitized event activity separately.
 
-`-ShowConversationViewer` opens a separate read-only Windows Terminal window for the current turn. The viewer reads the request body, live Markdown artifact, and final run record; it does not execute Claude or receive additional authority. After completion it stays open until the user presses Enter. Set `-ViewerHoldSeconds` to a positive value only when a timed close is explicitly wanted.
+`-ShowConversationViewer` opens a separate read-only Windows Terminal window for the current turn. It shows the request first, tails `live.md`, and renders only sanitized states and counters: running, idle-warning, stopped-timeout, stopped-user, failed, or completed. It never shows tool arguments, file names, raw JSON, or reasoning text. After completion it stays open until Enter. Set `-ViewerHoldSeconds` only for an explicit timed close.
 
 ## Tools and permissions
 
@@ -94,7 +96,7 @@ The first successful turn stores Claude's `session_id` plus a SHA-256 fingerprin
 
 It excludes `turn_id`, deadline, response-size limit, intent, and completion marker so a later turn can change its question and marker without laundering authority.
 
-Use `-Resume` only with the same chat-mode `session_id` and unchanged contract. The supervisor rejects missing state, changed fingerprints, and a changed returned Claude session ID. If authority changes, create a new chat-mode session.
+Use `-Resume` only after a successful prior turn with the same chat-mode `session_id` and unchanged contract. Failure invalidates session state. Timeout retry must use a new chat-mode session ID with narrower scope; provisional IDs observed before a final result are never valid resume state.
 
 Do not use `--continue`, an unqualified `--resume`, or a session selected from Claude's interactive history. Resume only the exact ID recorded by the supervisor.
 
@@ -105,12 +107,13 @@ For session `<session-id>` and turn `<turn-id>`, the supervisor writes:
 ```text
 .chat-mode/sessions/<session-id>/claude-cli-state.json
 .chat-mode/sessions/<session-id>/turn-<turn-id>.live.md
+.chat-mode/sessions/<session-id>/turn-<turn-id>.status.json
 .chat-mode/sessions/<session-id>/turn-<turn-id>.response.md
 .chat-mode/sessions/<session-id>/turn-<turn-id>.run.json
 .chat-mode/sessions/<session-id>.md
 ```
 
-`claude-cli-state.json` holds resume state and the contract fingerprint. `live.md` is non-authoritative scratch output appended from parsed text deltas while Claude runs. `run.json` records elapsed time, final/live byte counts, stream event count, Git snapshots, and stop reason. The supervisor, not Claude, writes all of these artifacts.
+`claude-cli-state.json` holds the fingerprint and a `resumable` flag. `live.md` is non-authoritative text output. `status.json` atomically records sanitized state, elapsed/activity timestamps, event counts, and advisory Read-call counts. `run.json` is always written after process start: success records include the validated Claude session ID; failure records include the exact stop reason, last activity, Git snapshots, and only a provisional unvalidated ID when available.
 
 Codex may read the new tail of `live.md` during bounded waits and relay brief excerpts to the user. Never relay raw NDJSON, tool arguments, repeated spans, or partial text as a completed conclusion. The final `response.md` is written only after the final result passes all validation.
 
@@ -147,6 +150,6 @@ Expired-login classification currently depends on matching `authenticate`, `OAut
 
 On the validated Windows host, `Get-Command claude` resolves to the npm `claude.ps1` shim and the supervisor launches it through `pwsh -File`. Other npm or PATH configurations may resolve differently; verify with `-Action Status` and use the explicit `-ClaudeExe`/`-ClaudeArgsPrefix` escape hatch only for a known local shim.
 
-The authoritative response-size check still occurs against the final result after stdout completes. Live text stops appending at the same byte threshold and records a truncation notice, but the Claude process continues so its final result can be classified correctly. Keep `MaxAgentTurns` and wall-clock timeout bounded; preventive mid-generation termination requires separate failure-mode testing.
+The authoritative response-size check still occurs against the final result after stdout completes. Live text stops appending at the same byte threshold and records a truncation notice. Read counts are advisory because the transport cannot guarantee exact tool-result byte visibility. Collect real successful and failed idle-gap distributions before considering any idle-based kill policy.
 
 Use Claude Desktop when the task needs visible secret entry, out-of-repository machine setup, or explicit direct-main-exclusive authority. Do not run Desktop and CLI writers concurrently in one worktree.

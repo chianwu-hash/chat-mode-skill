@@ -58,6 +58,8 @@ While Claude runs, partial assistant text is written incrementally to `turn-<id>
 
 Add `-ShowConversationViewer` to open a separate, read-only Windows Terminal mirror. It shows the Codex request first, appends Claude text while it is generated, and stays open after completion until you press Enter. Use a positive `-ViewerHoldSeconds` only when an automatic close is wanted.
 
+Ordinary review uses `-ClaudeEffort medium -TimeoutSeconds 300 -IdleWarningSeconds 90`. Explicit deep review may use `high`, 600 seconds, and a 150-second warning. Idle warnings are visible telemetry, not kill conditions. Every started turn writes sanitized status plus a success or failure run record; failed state is non-resumable, and a timeout retry must use a new session ID with narrower scope.
+
 ## Safety and handback
 
 - Codex owns orchestration and Git integration; Claude must not start another agent loop.

@@ -15,7 +15,7 @@ Run Codex as the only orchestrator. Use `claude -p` through the bundled supervis
 4. Require Claude Code 2.1.233 or newer and a logged-in `claude.ai` subscription. Reject `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`; chat-mode must not silently switch to API billing.
 5. Exclude project/local Claude configuration with `--setting-sources user`, strict MCP configuration, disabled slash commands, and explicit tools. Do not use `--bare`, because bare mode skips subscription OAuth.
 6. Bind resume state to a fingerprint of the authority contract. Resume only when mode, repository/worktree, baseline, scope, commands, and Git/network/credential/deployment authority are unchanged.
-7. Bound every turn by wall time, response bytes, agent turns, and `.chat-mode/STOP`. Default to 3 chat turns, 5 minutes per Claude turn, 50,000 response bytes, and 12 internal agent turns.
+7. Bound every turn by wall time, response bytes, agent turns, and `.chat-mode/STOP`. Ordinary review defaults to medium effort and 5 minutes; deep review requires explicit high effort and a 10-minute ceiling. Idle gaps are warnings, not kill conditions, until real timing evidence supports a safe threshold.
 8. Use one writer per worktree. Codex remains the project writer in review; Claude exclusively owns its isolated worktree during implementation.
 9. Treat the user's task as delegated authority for necessary project-local reads, declared in-scope writes, and declared validation. Ask only when authority expands or risk materially changes.
 10. Keep host setup and direct-main-exclusive on Claude Desktop until a preventive CLI policy boundary is proven for them.
@@ -99,12 +99,14 @@ pwsh -NoProfile -File .\skills\chat-mode\scripts\claude-cli-supervisor.ps1 `
   -WorkingTree '<working-tree>' `
   -RequestPath '<working-tree>/.chat-mode/exchange/<session-id>/turn-0001.request.md' `
   -TimeoutSeconds 300 `
+  -ClaudeEffort medium `
+  -IdleWarningSeconds 90 `
   -MaxResponseBytes 50000 `
   -MaxAgentTurns 12 `
   -ShowConversationViewer
 ```
 
-The supervisor verifies version and subscription auth, denies API fallback, excludes project/local Claude settings and MCP discovery, exposes mode-specific tools, enforces STOP/timeout/marker/size checks, stores the Claude session ID and contract fingerprint, writes artifacts, and rejects review Git mutation. For a visible user session, pass `-ShowConversationViewer` to open a read-only Windows Terminal mirror containing only the request body, Claude text deltas, and completion state. The completed viewer stays open until the user presses Enter by default; pass a positive `-ViewerHoldSeconds` only when timed closing is explicitly wanted. During bounded waits, read only the newly appended text from `turn-<id>.live.md` and relay short, nonduplicated excerpts to the user; do not paste raw stream JSON or treat partial text as final.
+The supervisor verifies version and subscription auth, denies API fallback, excludes project/local Claude settings and MCP discovery, exposes mode-specific tools, enforces STOP/timeout/marker/size checks, stores resumable state only after success, writes success or failure artifacts, and rejects review Git mutation. Use `-ClaudeEffort high -TimeoutSeconds 600 -IdleWarningSeconds 150` only for an explicitly deep turn. For a visible user session, pass `-ShowConversationViewer` to open a read-only Windows Terminal mirror containing the request body, Claude text deltas, and sanitized running/idle/stopped/completed state. The completed viewer stays open until the user presses Enter by default. During bounded waits, relay only short, new excerpts from `live.md`; never expose raw stream JSON, tool arguments, or partial text as final.
 
 ### 6. Continue a multi-turn session
 
@@ -145,7 +147,7 @@ Use Claude Desktop plus Computer Use for `host-setup-delegated`, `direct-main-ex
 ## Failure order
 
 1. Classify `version_too_old`, `auth_required`, `user_stop`, `timeout`, `response_too_large`, `malformed_response`, `unexpected_mutation`, or `write_scope_violation`.
-2. Retry once only for a clearly transient CLI failure with the same contract and session state.
+2. After timeout, retry at most once with narrower scope, the same authority, and a new chat-mode `session_id`; never resume a timed-out or otherwise failed Claude session.
 3. Use Desktop only when visible supervision addresses the failure or the mode requires it.
 4. Ask the user when login, credentials, authority expansion, destructive cleanup, production access, or a materially different transport is required.
 

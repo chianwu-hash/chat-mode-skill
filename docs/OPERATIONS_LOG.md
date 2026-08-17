@@ -2,6 +2,26 @@
 
 This file records significant chat-mode-skill changes for future AI handoff. It is not a full transcript.
 
+## 2026-08-17 Harden timeout observability and retry safety
+
+Status: completed
+Changed by: Codex
+Related task: Prevent broad high-effort Claude reviews from returning to black-box timeout behavior
+
+Summary:
+
+- Added explicit medium/high effort selection, advisory idle thresholds, sanitized atomic status, and durable success/failure run records.
+- Removed unbounded raw NDJSON accumulation; only the final result line remains in memory while live text and activity metadata stream to artifacts.
+- Made every process-started failure non-resumable. Timeout retry now requires narrower scope and a new chat-mode session ID.
+- Extended the viewer with running, idle-warning, stopped, failed, and completed states without exposing tool arguments, file names, raw JSON, or reasoning.
+
+Evidence:
+
+- The incident session read about 97,000 characters across 10 files, then produced no model event for roughly 4.5 minutes before the 300-second kill. A 3-file retry completed in 124.9 seconds.
+- A two-turn Claude discussion agreed on medium/300/90 for ordinary review, explicit high/600/150 for deep review, warning-only idle telemetry, durable failure artifacts, and no resume after timeout.
+- Fake-worker smoke covers timeout, STOP, response-too-large, malformed output, explicit effort, failure artifacts, resume invalidation, and viewer success/failure rendering.
+- A real Pro OAuth medium-effort viewer turn completed in 13.556 seconds with 51 events, atomic completed status, resumable validated state, and identical Git baselines.
+
 ## 2026-08-17 Prove visible conversation viewer
 
 Status: completed

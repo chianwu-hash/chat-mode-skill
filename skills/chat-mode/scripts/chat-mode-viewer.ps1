@@ -9,6 +9,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$RunPath,
 
+    [string]$StatusPath = '',
+
     [int]$ParentProcessId = 0,
 
     [int]$HoldSeconds = 0,
@@ -75,6 +77,20 @@ function Wait-BeforeClose {
     [void](Read-Host)
 }
 
+function Get-StatusSnapshot {
+    if ([string]::IsNullOrWhiteSpace($StatusPath) -or
+        -not (Test-Path -LiteralPath $StatusPath -PathType Leaf)) {
+        return $null
+    }
+
+    try {
+        [System.IO.File]::ReadAllText($StatusPath, $utf8NoBom) | ConvertFrom-Json
+    }
+    catch {
+        $null
+    }
+}
+
 if (-not $NoClear) { Clear-Host }
 Write-Host 'CHAT MODE' -ForegroundColor White
 Write-Host 'Live conversation mirror' -ForegroundColor DarkGray
@@ -85,6 +101,7 @@ Write-Host (Get-RequestBody -Path $RequestPath)
 Write-RoleHeading -Text 'CLAUDE -> CODEX' -Color Magenta
 
 $reader = $null
+$viewerTimer = [System.Diagnostics.Stopwatch]::StartNew()
 try {
     while (-not (Test-Path -LiteralPath $LivePath -PathType Leaf)) {
         if (-not (Test-ParentAlive)) { return }
@@ -105,16 +122,45 @@ try {
             [Console]::Write($chunk)
         }
 
+        $status = Get-StatusSnapshot
+        $viewerState = 'running'
+        $eventCount = 0
+        $lastEventKind = 'starting'
+        $idleSeconds = [math]::Floor($viewerTimer.Elapsed.TotalSeconds)
+        if ($null -ne $status) {
+            $viewerState = [string]$status.state
+            $eventCount = [int]$status.eventCount
+            $lastEventKind = [string]$status.lastEventKind
+            if (-not [string]::IsNullOrWhiteSpace([string]$status.lastEventAt)) {
+                $lastEvent = [DateTimeOffset]::Parse([string]$status.lastEventAt)
+                $idleSeconds = [math]::Max(0, [math]::Floor(([DateTimeOffset]::UtcNow - $lastEvent).TotalSeconds))
+            }
+            if ($viewerState -eq 'running' -and $idleSeconds -ge [int]$status.idleWarningSeconds) {
+                $viewerState = 'idle-warning'
+            }
+        }
+        Write-Progress `
+            -Id 1 `
+            -Activity "Claude status: $viewerState" `
+            -Status "elapsed $([math]::Floor($viewerTimer.Elapsed.TotalSeconds))s | idle ${idleSeconds}s | events $eventCount | $lastEventKind"
+
         if (Test-Path -LiteralPath $RunPath -PathType Leaf) {
             $run = [System.IO.File]::ReadAllText($RunPath, $utf8NoBom) | ConvertFrom-Json
+            Write-Progress -Id 1 -Activity 'Claude status' -Completed
             Write-Host ''
-            Write-RoleHeading -Text "TURN $($run.turnId) COMPLETE" -Color Green
+            if ($run.status -eq 'completed' -or $run.stopReason -eq 'completed') {
+                Write-RoleHeading -Text "TURN $($run.turnId) COMPLETE" -Color Green
+            }
+            else {
+                Write-RoleHeading -Text "TURN $($run.turnId) STOPPED: $(([string]$run.stopReason).ToUpperInvariant())" -Color Yellow
+            }
             Wait-BeforeClose
             break
         }
 
         if (-not (Test-ParentAlive)) {
             Write-Host ''
+            Write-Progress -Id 1 -Activity 'Claude status' -Completed
             Write-RoleHeading -Text 'TURN ENDED WITHOUT A COMPLETION RECORD' -Color Yellow
             Wait-BeforeClose
             break
@@ -124,5 +170,7 @@ try {
     }
 }
 finally {
+    $viewerTimer.Stop()
+    Write-Progress -Id 1 -Activity 'Claude status' -Completed
     if ($null -ne $reader) { $reader.Dispose() }
 }

@@ -28,6 +28,7 @@ The transport never defines authority. The request envelope, selected working tr
     <session-id>/
       claude-cli-state.json
       turn-0001.live.md
+      turn-0001.status.json
       turn-0001.response.md
       turn-0001.run.json
     <session-id>.direct-main.json
@@ -158,8 +159,8 @@ The first successful turn stores the returned Claude session ID. A later turn ma
 4. Write the request atomically under the selected tree.
 5. Run supervisor `-Action Status`; require Claude Code 2.1.233+ and `claude.ai` subscription auth with no API credential variables.
 6. Invoke the first turn without `-Resume`, or a later unchanged-contract turn with `-Resume`.
-7. Parse partial stream events into a non-authoritative live artifact while enforcing timeout and STOP; require a valid final result event, size limit, and trailing marker.
-8. Record state, run, response, transcript, and Git snapshots.
+7. Parse partial stream events into non-authoritative live text and sanitized status while enforcing wall timeout and STOP; idle gaps warn but do not kill.
+8. Record success or failure run/status/transcript artifacts and Git snapshots. Store resumable state only after validated success.
 9. For review, reject any new Git state relative to baseline.
 10. For isolated implementation, freeze Claude and run the worktree inspector; require scope/diff/main checks and reproduce tests.
 11. Let Codex accept the handback, request another bounded turn, or stop.
@@ -174,10 +175,12 @@ Defaults:
 - maximum chat turns: 3;
 - per-turn deadline: 5 minutes;
 - maximum internal agent turns: 12;
+- ordinary review: medium effort, 300-second wall ceiling, idle warning after 90 seconds;
+- explicit deep review: high effort, 600-second wall ceiling, idle warning after 150 seconds;
 - maximum response: 50,000 UTF-8 bytes;
 - one orchestrator and one worker;
 - one writer per worktree;
-- one automatic retry only for a clearly transient failure under the same contract;
+- one timeout retry only with narrower scope, unchanged authority, a new chat-mode session ID, and no resume;
 - no automatic retry after mutation, malformed output, contract mismatch, auth failure, or STOP.
 
 ## Completion
@@ -189,7 +192,7 @@ A CLI turn completes only when:
 - partial output was treated as non-authoritative and the live artifact stayed within its soft cap;
 - Claude session ID is present and stable on resume;
 - review Git snapshots match;
-- response, run, state, and transcript artifacts are written;
+- response, run, status, resumable state, and transcript artifacts are written;
 - isolated handback later passes worktree inspection.
 
 Session stop reasons include:
@@ -220,6 +223,7 @@ desktop_unavailable
 - Never call raw `claude -p` for a real turn; use the supervisor.
 - Never let Claude invoke another agent CLI.
 - Never resume after the authority fingerprint changes.
+- Never resume a timed-out, stopped, malformed, or otherwise failed turn; use a new chat-mode session ID for a bounded timeout retry.
 - Never run CLI and Desktop writers concurrently in one worktree.
 - Never let Codex and Claude write the same worktree concurrently.
 - Never treat CLI permission rules, Accept edits, Bypass, cwd, or a worktree as an OS sandbox.
